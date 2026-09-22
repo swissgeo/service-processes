@@ -1,0 +1,3 @@
+# Application core
+
+App-wide config, settings, security utilities, ...
