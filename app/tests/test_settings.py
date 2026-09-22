@@ -12,7 +12,7 @@ def test_defaults():
         _env_file=None,
     )
 
-    assert settings.root_path == "/api/adm/v1"
+    assert settings.root_path == "/api/oap/v1"
     assert settings.cors_origins == []
     assert settings.cors_method == ["GET", "POST"]
     assert settings.cors_headers == ["*"]

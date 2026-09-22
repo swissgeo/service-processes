@@ -60,8 +60,7 @@ if settings.logging_handlers_level is not None:  # pragma: no cover
 app = FastAPI(
     title="Service Processes",
     summary="Start and view data pipelines",
-    description="""This services allows users to start and monitor data pipelines.
-    """,
+    description="""This services allows users to start and monitor data pipelines.""",
     version=__version__,
     contact={"name": "swissgeo", "url": "https://www.swissgeo.ch/infos"},
     license_info={

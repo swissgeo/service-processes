@@ -2,10 +2,10 @@
 
 | Branch | Status |
 |--------|-----------|
-| develop | ![Build Status](CODEBUILD_BADGE_URL) |
-| main | ![Build Status](CODEBUILD_BADGE_URL) |
+| develop | ![Build Status](https://codebuild.eu-central-1.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiR2RnY0VNbHRNdFRRMXFJdnp6UlVROUlNeXJ1b3c4Wm1jRVJmeU9NN24wVVY3M1ZmZmo3aTQ2YWVzaTJ0S3BUNWZjY3RBeUgrVTZkbGYzcW9vbXJCY3dvPSIsIml2UGFyYW1ldGVyU3BlYyI6ImZXeitFbnQrTnV0djBKZzEiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=develop) [![codecov](https://codecov.io/github/swissgeo/service-processes/graph/badge.svg?token=07AV3ADXP1)](https://codecov.io/github/swissgeo/service-processes) |
+| main | ![Build Status](https://codebuild.eu-central-1.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiR2RnY0VNbHRNdFRRMXFJdnp6UlVROUlNeXJ1b3c4Wm1jRVJmeU9NN24wVVY3M1ZmZmo3aTQ2YWVzaTJ0S3BUNWZjY3RBeUgrVTZkbGYzcW9vbXJCY3dvPSIsIml2UGFyYW1ldGVyU3BlYyI6ImZXeitFbnQrTnV0djBKZzEiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=main) [![codecov](https://codecov.io/gh/swissgeo/service-processes/branch/main/graph/badge.svg)](https://app.codecov.io/gh/swissgeo/service-processes/tree/main) |
 
-Service processes provides an API for starting and monitoring pipelines, devoupling consumers from Airflow's native API.
+Service processes provides an API for starting and monitoring pipelines, decoupling consumers from Airflow's native API.
 
 ## Development
 
@@ -154,7 +154,7 @@ Attributes attached to `http.server.active_requests`:
 
 In production deployments, telemetry can be exported using the configured OTLP exporters,
 typically to an OpenTelemetry Collector or any OTLP-compatible observability platform. Only the OTLP
-exportert is currently implemented by the application configuration layer.
+exporter is currently implemented by the application configuration layer.
 
 By default, local development with the FastAPI dev server (make serve) runs with
 OpenTelemetry disabled and uses standard Python console logging for a simpler and more
