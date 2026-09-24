@@ -1,9 +1,11 @@
 import json
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
 from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
+from fastapi.testclient import TestClient
 
 import pytest
 
@@ -34,7 +36,7 @@ async def test_unified_exception_handler_validation_error():
 
 @pytest.mark.asyncio
 async def test_unified_exception_handler_http_exception_string_detail():
-    exc = HTTPException(status_code=404, detail="Not Found")
+    exc = StarletteHTTPException(status_code=404, detail="Not Found")
 
     response = await unified_exception_handler(_make_request(), exc)
 
@@ -62,3 +64,22 @@ async def test_unified_exception_handler_unhandled_exception():
     assert response.status_code == 500
     body = json.loads(bytes(response.body))
     assert body["error"] == "internal server error"
+
+
+def test_404_not_found_uses_unified_error_schema(client: TestClient):
+    response = client.get("/this-route-does-not-exist")
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error"] == "Not Found"
+    assert "message" in body
+    assert "detail" not in body
+
+
+def test_405_method_not_allowed_uses_unified_error_schema(client: TestClient):
+    response = client.post("/checker")
+
+    assert response.status_code == 405
+    body = response.json()
+    assert body["error"] == "Method Not Allowed"
+    assert "message" in body

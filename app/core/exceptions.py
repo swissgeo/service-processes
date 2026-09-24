@@ -1,9 +1,8 @@
 from http import HTTPStatus
 
-from starlette.requests import Request
-from starlette.responses import Response
+from starlette.exceptions import HTTPException
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -27,7 +26,7 @@ async def validation_exception_handler(
             error="Validation Error",
             message="Invalid request payload",
             detail=exc.errors() or None,
-        ).model_dump(),
+        ).model_dump(exclude_none=True),
     )
 
 
@@ -56,7 +55,7 @@ async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONR
     )
 
 
-async def unified_exception_handler(request: Request, exc: Exception) -> Response:
+async def unified_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     if isinstance(exc, RequestValidationError):
         return await validation_exception_handler(request, exc)
 
