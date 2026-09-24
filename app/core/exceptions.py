@@ -65,9 +65,9 @@ async def unified_exception_handler(request: Request, exc: Exception) -> JSONRes
     return JSONResponse(
         status_code=500,
         content=ErrorResponse(
-            error="internal server error",
+            error="Internal Server Error",
             message="An unexpected error occurred",
-        ).model_dump(),
+        ).model_dump(exclude_none=True),
     )
 
 

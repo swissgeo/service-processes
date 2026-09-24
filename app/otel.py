@@ -49,7 +49,7 @@ def _get_exporters() -> tuple[
 ]:
     settings = get_settings()
 
-    if settings.otel_sdk_disabled and not settings.otel_enable_otlp_exporter:
+    if settings.otel_sdk_disabled or not settings.otel_enable_otlp_exporter:
         return None, None, None
 
     logs_exporters = OTLPLogExporter(

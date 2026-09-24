@@ -90,9 +90,7 @@ def test_internal_spec_has_no_422_responses(client: TestClient):
             )
 
 
-# NOTE: we cannot test whether the internal spec is not served when disabled,
-# as the application is initialized before the settings are mocked. So this
-# that to do this test we would need to change the application and do the
-# disabling of spec serving at request time and not at application startup.
-# This would require a refactoring of the application and increase its complexity.
-# just for testing purposes.
+# NOTE: We cannot test that the internal spec is unavailable when disabled,
+# because the application is initialized before settings are mocked. Testing
+# this would require disabling spec serving at request time, a refactoring
+# we deemed not worth the added complexity.

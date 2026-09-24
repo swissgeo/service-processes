@@ -25,7 +25,7 @@ PRE_COMMIT := $(UV_RUN) pre-commit
 FASTAPI := $(UV_RUN) fastapi
 UVICORN := $(UV_RUN) uvicorn
 
-# Docker variables?
+# Docker variables
 DOCKER_REGISTRY := 074597099015.dkr.ecr.eu-central-1.amazonaws.com
 DOCKER_IMG_LOCAL_TAG := $(DOCKER_REGISTRY)/swissgeo/$(SERVICE_NAME):local-$(USER)-$(GIT_HASH_SHORT)
 
@@ -143,7 +143,7 @@ test-ci: ## Run tests in the CI
 test: ## Run tests locally
 	$(TEST) --cov --cov-branch --cov-report=term --cov-report=html -n 10
 
-
+.PHONY: docker-network
 docker-network:
 	@if ! docker network inspect service_processes_network >/dev/null 2>&1; then \
 		echo "Creating network service_processes_network"; \

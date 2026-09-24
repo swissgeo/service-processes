@@ -33,6 +33,7 @@ test_*
 .vscode/
 .idea/
 *.iml
+.zed/
 
 # environment files
 .env

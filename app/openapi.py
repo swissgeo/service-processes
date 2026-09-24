@@ -1,3 +1,11 @@
+"""Split OpenAPI specs into a public and an internal spec.
+
+The public spec exposes routes intended for external consumers,
+the internal spec exposes routes tagged as internal.
+Both specs strip the auto-generated 422 responses as they are
+overwritten to 400 by custom exceptionhandlers.
+"""
+
 import json
 from functools import lru_cache
 from typing import Any

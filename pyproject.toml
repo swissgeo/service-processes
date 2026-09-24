@@ -10,7 +10,6 @@ dependencies = [
     "fastapi[standard]~=0.141",
     "httptools~=0.8",
     "opentelemetry-exporter-otlp~=1.44",
-    "opentelemetry-instrumentation-asgi~=0.65b0",
     "opentelemetry-instrumentation-botocore~=0.65b0",
     "opentelemetry-instrumentation-fastapi~=0.65b0",
     "opentelemetry-sdk~=1.44",

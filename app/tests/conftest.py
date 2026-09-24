@@ -10,7 +10,7 @@ from app.settings import Settings, get_settings
 
 @pytest.fixture
 def settings() -> Settings:
-    """Fixture to provide application settings for testing, overriding the DynamoDB endpoint URL."""
+    """Fixture to provide application settings for testing."""
     return Settings(
         # Pydantic will automatically load any .env or .env.default file, so for testing to avoid
         # any different test result between CI and local environment (in which .env file can differ)

@@ -5,7 +5,7 @@
 | develop | ![Build Status](https://codebuild.eu-central-1.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiR2RnY0VNbHRNdFRRMXFJdnp6UlVROUlNeXJ1b3c4Wm1jRVJmeU9NN24wVVY3M1ZmZmo3aTQ2YWVzaTJ0S3BUNWZjY3RBeUgrVTZkbGYzcW9vbXJCY3dvPSIsIml2UGFyYW1ldGVyU3BlYyI6ImZXeitFbnQrTnV0djBKZzEiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=develop) [![codecov](https://codecov.io/github/swissgeo/service-processes/graph/badge.svg?token=07AV3ADXP1)](https://codecov.io/github/swissgeo/service-processes) |
 | main | ![Build Status](https://codebuild.eu-central-1.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiR2RnY0VNbHRNdFRRMXFJdnp6UlVROUlNeXJ1b3c4Wm1jRVJmeU9NN24wVVY3M1ZmZmo3aTQ2YWVzaTJ0S3BUNWZjY3RBeUgrVTZkbGYzcW9vbXJCY3dvPSIsIml2UGFyYW1ldGVyU3BlYyI6ImZXeitFbnQrTnV0djBKZzEiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=main) [![codecov](https://codecov.io/gh/swissgeo/service-processes/branch/main/graph/badge.svg)](https://app.codecov.io/gh/swissgeo/service-processes/tree/main) |
 
-Service processes provides an API for starting and monitoring pipelines, decoupling consumers from Airflow's native API.
+Service processes provides an API for managing and monitoring pipelines, decoupling consumers from Airflow's native API.
 
 ## Development
 
@@ -161,7 +161,6 @@ OpenTelemetry disabled and uses standard Python console logging for a simpler an
 readable developer experience.
 
 See [OpenTelemetry Python Instrumentation documentation](https://opentelemetry.io/docs/languages/python/instrumentation)
-
 for more information about adding tracing and metrics inside the application code.
 
 ### Logging implementation
