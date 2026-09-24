@@ -1,0 +1,139 @@
+[project]
+name = "service-processes"
+readme = "README.md"
+requires-python = ">=3.14"
+dynamic = ["version"]
+
+#===============================================================================
+# Dependencies
+dependencies = [
+    "fastapi[standard]~=0.141",
+    "httptools~=0.8",
+    "opentelemetry-exporter-otlp~=1.44",
+    "opentelemetry-instrumentation-botocore~=0.65b0",
+    "opentelemetry-instrumentation-fastapi~=0.65b0",
+    "opentelemetry-sdk~=1.44",
+    "pydantic-settings~=2.15",
+    "uvloop~=0.22",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit~=4.6",
+    "pytest~=9.1",
+    "pytest-asyncio~=1.4",
+    "pytest-cov~=7.1",
+    "pytest-xdist~=3.8",
+    "ruff~=0.16",
+    "ty~=0.0",
+]
+
+#===============================================================================
+# uv configuration
+[tool.uv]
+package = false # Do not install as a package
+
+#===============================================================================
+# FastAPI configuration
+[tool.fastapi]
+entrypoint = "app.main:app"
+
+#===============================================================================
+# Ruff configuration
+[tool.ruff]
+src = ["app"]
+
+# Same as Black.
+line-length = 100
+indent-width = 4
+
+# Assume Python 3.14
+target-version = "py314"
+
+#------------------------------------------------------------------------------
+# Linting configuration
+[tool.ruff.lint]
+exclude = []
+select = ["ALL"]
+ignore = [
+    "ANN401", # Ignore Any typehint
+    "ANN002", # Ignore typehint for *args
+    "ANN003", # Ignore typehint for **kwargs
+    "D",      # Ignore pydocstyle
+    "EM",     # Ignore flake8-errmsg
+    "FBT001", # Ignore boolean-type-hint-positional-argument
+    "FBT002", # Ignore boolean-default-value-positional-argument
+    "PTH123", # Ignore builtin-open
+    "TD",     # Ignore flake8-todos
+    "FIX",    # Ignore fixme comments
+    "ERA001", # TODO remove this for production, ignore commented code
+    "COM812", # flak8-commas missing-trailing-comma is ignored to avoid conflict with formatter which enforces trailing commas
+    "TRY003", # Ignore long messages in exceptions
+    "CPY001", # Ignore missing copyright notice in python files
+
+    # Pydantic schemas uses type annotations at runtime to generate the openapi
+    # and do the validation. Putting the type annotation in a TYPE_CHECKING
+    # block creates weird hard to debug code.
+    # Same for fastAPI dependencies which also use type annotations at runtime.
+    "TC003", # Ignore type annotation not in TYPE_CHECKING block
+    "TC002", # Ignore type annotation not in TYPE_CHECKING block for third party import
+    "TC001", # Ignore type annotation not in TYPE_CHECKING block for first party import
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+unfixable = []
+
+fixable = ["ALL"]
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+#------------------------------------------------------------------------------
+# ruff ignore per files
+[tool.ruff.lint.per-file-ignores]
+
+
+"app/tests/**" = [
+    "S101",    # Ignore usage of assert statements in tests
+    "ANN201",  # Ignore missing return type hints in tests
+    "PLR2004", # Ignore magic number in tests
+    "PLR0913", # Ignore too many arguments in function in tests
+]
+
+#------------------------------------------------------------------------------
+# Isort configuration
+[tool.ruff.lint.isort]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "fastapi",
+    "test",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.lint.isort.sections]
+test = ["pytest"]
+fastapi = ["fastapi", "pydantic"]
+
+#===============================================================================
+# ty configuration
+[tool.ty.environment]
+
+[tool.ty.src]
+exclude = []
+
+#===============================================================================
+# Pytest configuration
+[tool.pytest]
+pythonpath = ["app"]
+python_files = ["test_*.py"]
+addopts = []
+
+#==============================================================================
+# Coverage configuration
+[tool.coverage.run]
+omit = ["*/tests/*", "version.py", "otel.py"]
+
+[tool.coverage.report]
+exclude_lines = ["if TYPE_CHECKING:", "pragma: no cover"]

@@ -1,0 +1,38 @@
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: --config otel-local-config.yaml
+    volumes:
+      - ./otel-local-config.yaml:/otel-local-config.yaml
+    ports:
+      - "4317:4317"
+    depends_on:
+      - jaeger
+      - prometheus
+    networks:
+      - network_local
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686" # Jaeger UI
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - network_local
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-otlp-receiver
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - network_local
+
+networks:
+  network_local:
+    external: true
+    name: service_processes_network
