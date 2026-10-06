@@ -27,7 +27,7 @@ To create and activate a virtual Python environment with all dependencies instal
 make setup
 ```
 
-Then run OTEL dependencies
+Then run local dependencies (PostgreSQL and OpenTelemetry)
 
 ```bash
 make docker-compose-up
@@ -38,6 +38,42 @@ Then run the server from a separate terminal
 ```bash
 make serve
 ```
+
+### Database
+
+Local development uses PostgreSQL 18. `make docker-compose-up` creates the application database
+and its non-administrator role on its first run. The local connection settings are in
+`.env.default` (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PW`), and are read
+automatically by the application.
+
+For deployed environments, set `DATABASE_URL` to an async SQLAlchemy PostgreSQL URL; it takes
+precedence over the individual `DB_*` variables:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://user:password@db.example.com:5432/service_processes
+```
+
+Endpoints can receive a request-scoped async session with `DatabaseSessionDep`:
+
+```python
+from sqlalchemy import select
+
+from app.core.database import DatabaseSessionDep
+
+
+async def list_processes(session: DatabaseSessionDep):
+    result = await session.execute(select(Process))
+    return result.scalars().all()
+```
+
+The dependency does not commit transactions. Read endpoints can execute queries directly; write
+endpoints should use an explicit `async with session.begin():` block. The connection pool is
+created with the FastAPI lifespan and disposed during shutdown.
+
+> [!NOTE]
+> PostgreSQL initialization scripts run only when the data directory is empty. To recreate the
+> local database after changing its initial users or database name, stop Compose and remove
+> `.volumes/postgresql` (this deletes local database data) before starting it again.
 
 ### Linting and Formatting
 

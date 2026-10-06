@@ -1,4 +1,28 @@
 services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${DB_ADMIN_PW}
+      POSTGRES_DB: postgres
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PW: ${DB_PW}
+    volumes:
+      - source: ${PWD}/.volumes/postgresql
+        target: /var/lib/postgresql
+        type: bind
+        bind:
+          create_host_path: true
+      - ./init-app-database.sh:/docker-entrypoint-initdb.d/init-app-database.sh:ro
+    ports:
+      - "${DB_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=$${POSTGRES_USER} --dbname=$${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     command: --config otel-local-config.yaml

@@ -16,6 +16,12 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("CORS_METHOD", raising=False)
     monkeypatch.delenv("CORS_HEADERS", raising=False)
     monkeypatch.delenv("CORS_MAX_AGE", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_HOST", raising=False)
+    monkeypatch.delenv("DB_PORT", raising=False)
+    monkeypatch.delenv("DB_NAME", raising=False)
+    monkeypatch.delenv("DB_USER", raising=False)
+    monkeypatch.delenv("DB_PW", raising=False)
 
     settings = Settings(
         _env_file=None,
@@ -26,6 +32,22 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch):
     assert settings.cors_method == ["GET", "POST"]
     assert settings.cors_headers == ["*"]
     assert settings.cors_max_age == 600
+    assert (
+        settings.async_database_url
+        == "postgresql+asyncpg://service_processes:service_processes@localhost:15432/service_processes"
+    )
+
+
+def test_database_url_takes_precedence_over_component_settings(monkeypatch: pytest.MonkeyPatch):
+    database_url = "postgresql+asyncpg://readonly:secret@db.example.test:5432/processes"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("DB_HOST", "ignored.example.test")
+
+    settings = Settings(
+        _env_file=None,
+    )
+
+    assert settings.async_database_url == database_url
 
 
 def test_env_overrides_simple_values(monkeypatch: pytest.MonkeyPatch):

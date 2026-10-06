@@ -3,9 +3,10 @@ from pathlib import Path
 from typing import Annotated
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 from fastapi import Depends
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 
 
 class Settings(BaseSettings):
@@ -20,6 +21,29 @@ class Settings(BaseSettings):
     # variable uses CONSTANT_CASE) and are parsed using json syntax.
 
     root_path: str = ""
+
+    # Database settings. DATABASE_URL takes precedence over the DB_* component settings.
+    database_url: str | None = None
+    db_host: str = "localhost"
+    db_port: int = 15432
+    db_name: str = "service_processes"
+    db_user: str = "service_processes"
+    db_pw: SecretStr = SecretStr("service_processes")
+
+    @property
+    def async_database_url(self) -> str:
+        """Return an async SQLAlchemy PostgreSQL URL without exposing the password in settings."""
+        if self.database_url is not None:
+            return self.database_url
+
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.db_user,
+            password=self.db_pw.get_secret_value(),
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+        ).render_as_string(hide_password=False)
 
     # OpenAPI settings
     publish_openapi_spec: bool = False
