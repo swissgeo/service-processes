@@ -22,6 +22,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("DB_NAME", raising=False)
     monkeypatch.delenv("DB_USER", raising=False)
     monkeypatch.delenv("DB_PW", raising=False)
+    monkeypatch.delenv("DB_CONNECT_TIMEOUT", raising=False)
 
     settings = Settings(
         _env_file=None,
@@ -36,6 +37,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch):
         settings.async_database_url
         == "postgresql+asyncpg://service_processes:service_processes@localhost:15432/service_processes"
     )
+    assert settings.db_connect_timeout == 10
 
 
 def test_database_url_takes_precedence_over_component_settings(monkeypatch: pytest.MonkeyPatch):

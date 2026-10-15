@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import internal
 from app.api.internal import INTERNAL_TAG
-from app.core.database import close_database, initialize_database
+from app.core.database import check_database_connection, close_database, initialize_database
 from app.core.exceptions import register_exception_handlers
 from app.openapi import get_openapi_spec_url, setup_openapi
 from app.otel import initialize_instrumentation, shutdown_otel
@@ -34,9 +34,11 @@ def get_logging_cfg(config_file: Path) -> dict:  # pragma: no cover
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     await initialize_database(app, settings)
-    logger.info("Startup tasks completed")
 
     try:
+        # Fail fast on startup if the database is not reachable
+        await check_database_connection(app.state.database_engine)
+        logger.info("Startup tasks completed")
         yield
     finally:
         await close_database(app)

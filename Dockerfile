@@ -40,6 +40,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 
 COPY --chown=${USER}:${GROUP} app/ ${INSTALL_DIR}/app/
+COPY --chown=${USER}:${GROUP} migrations/ ${INSTALL_DIR}/migrations/
+COPY --chown=${USER}:${GROUP}  pyproject.toml ${INSTALL_DIR}/pyproject.toml
 
 ###########################################################
 # Container to use in production

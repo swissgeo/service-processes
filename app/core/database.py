@@ -22,6 +22,7 @@ def create_database_engine(settings: Settings) -> AsyncEngine:
     return create_async_engine(
         settings.async_database_url,
         pool_pre_ping=True,
+        connect_args={"timeout": settings.db_connect_timeout},
     )
 
 

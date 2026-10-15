@@ -24,6 +24,7 @@ TY := $(UV_RUN) ty
 PRE_COMMIT := $(UV_RUN) pre-commit
 FASTAPI := $(UV_RUN) fastapi
 UVICORN := $(UV_RUN) uvicorn
+ALEMBIC := $(UV_RUN) alembic
 
 # Docker variables
 DOCKER_REGISTRY := 074597099015.dkr.ecr.eu-central-1.amazonaws.com
@@ -90,6 +91,31 @@ ci-check-format: format ## Check the format (CI)
 .PHONY: serve
 serve: ## Serve the application for development
 	${FASTAPI} dev --port ${HTTP_PORT}
+
+
+.PHONY: db-revision
+db-revision: ## Create a migration from model changes, e.g. make db-revision m="add process table"
+	$(ALEMBIC) revision --autogenerate -m "$(m)"
+
+
+.PHONY: db-upgrade
+db-upgrade: ## Apply all pending migrations
+	$(ALEMBIC) upgrade head
+
+
+.PHONY: db-downgrade
+db-downgrade: ## Revert the last migration
+	$(ALEMBIC) downgrade -1
+
+
+.PHONY: db-history
+db-history: ## Show migration history
+	$(ALEMBIC) history
+
+
+.PHONY: db-check
+db-check: ## Check that the migrations are in sync with the models (requires a running database)
+	$(ALEMBIC) check
 
 
 .PHONY: dockerlogin

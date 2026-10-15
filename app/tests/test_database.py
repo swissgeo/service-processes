@@ -29,6 +29,15 @@ async def test_create_database_engine_uses_database_url_override() -> None:
         await engine.dispose()
 
 
+def test_create_database_engine_sets_connect_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    create_async_engine = MagicMock()
+    monkeypatch.setattr("app.core.database.create_async_engine", create_async_engine)
+
+    create_database_engine(Settings(_env_file=None, db_connect_timeout=2.5))
+
+    assert create_async_engine.call_args.kwargs["connect_args"] == {"timeout": 2.5}
+
+
 @pytest.mark.asyncio
 async def test_database_lifecycle_initializes_and_clears_application_state() -> None:
     app = FastAPI()

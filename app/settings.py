@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     db_name: str = "service_processes"
     db_user: str = "service_processes"
     db_pw: SecretStr = SecretStr("service_processes")
+    # Timeout in seconds to establish a new connection, also applies when DATABASE_URL is set
+    db_connect_timeout: float = 10
 
     @property
     def async_database_url(self) -> str:
