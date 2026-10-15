@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -39,10 +40,15 @@ def app() -> FastAPI:
 
 
 @pytest.fixture
-def client(app: FastAPI, settings: Settings) -> Generator[TestClient]:
+def client(
+    app: FastAPI, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> Generator[TestClient]:
     """Fixture to provide a TestClient for the FastAPI application with settings dependency
     injection mocked.
+
+    The startup database ping is mocked, so that the tests don't require a running database.
     """
+    monkeypatch.setattr("app.main.check_database_connection", AsyncMock())
 
     def get_settings_override() -> Settings:
         return settings
