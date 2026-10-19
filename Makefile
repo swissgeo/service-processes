@@ -194,12 +194,12 @@ stop-otel: ## Stop the otel collector and jaeger trace analyzer
 
 
 .PHONY: docker-compose-up
-docker-compose-up: docker-network ## Start local dependencies (moto and otel)
+docker-compose-up: docker-network ## Start local dependencies (otel)
 	docker compose --env-file=${ENV_FILE} up --remove-orphans
 
 
 .PHONY: docker-compose-down
-docker-compose-down: ## Stop local dependencies (moto and otel)
+docker-compose-down: ## Stop local dependencies (otel)
 	docker compose --env-file=${ENV_FILE} down --remove-orphans --rmi local
 
 

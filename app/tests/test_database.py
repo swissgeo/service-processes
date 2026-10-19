@@ -18,12 +18,22 @@ from app.settings import Settings
 
 
 @pytest.mark.asyncio
-async def test_create_database_engine_uses_database_url_override() -> None:
-    database_url = "postgresql+asyncpg://readonly:secret@db.example.test:5432/processes"
-    engine = create_database_engine(Settings(_env_file=None, database_url=database_url))
+async def test_create_database_engine_uses_database_settings() -> None:
+    engine = create_database_engine(
+        Settings(
+            _env_file=None,
+            db_host="db.example.test",
+            db_port=5432,
+            db_name="processes",
+            db_user="readonly",
+            db_pw="secret",
+        )
+    )
 
     try:
-        assert engine.url.render_as_string(hide_password=False) == database_url
+        assert engine.url.render_as_string(hide_password=False) == (
+            "postgresql+asyncpg://readonly:secret@db.example.test:5432/processes"
+        )
         assert engine.pool._pre_ping is True  # noqa: SLF001
     finally:
         await engine.dispose()

@@ -22,22 +22,18 @@ class Settings(BaseSettings):
 
     root_path: str = ""
 
-    # Database settings. DATABASE_URL takes precedence over the DB_* component settings.
-    database_url: str | None = None
+    # Database settings
     db_host: str = "localhost"
     db_port: int = 15432
     db_name: str = "service_processes"
     db_user: str = "service_processes"
     db_pw: SecretStr = SecretStr("service_processes")
-    # Timeout in seconds to establish a new connection, also applies when DATABASE_URL is set
+    # Timeout in seconds to establish a new connection
     db_connect_timeout: float = 10
 
     @property
     def async_database_url(self) -> str:
         """Return an async SQLAlchemy PostgreSQL URL without exposing the password in settings."""
-        if self.database_url is not None:
-            return self.database_url
-
         return URL.create(
             "postgresql+asyncpg",
             username=self.db_user,

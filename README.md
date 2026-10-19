@@ -46,16 +46,12 @@ and its non-administrator role on its first run. The local connection settings a
 `.env.default` (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PW`), and are read
 automatically by the application.
 
-For deployed environments, set `DATABASE_URL` to an async SQLAlchemy PostgreSQL URL; it takes
-precedence over the individual `DB_*` variables:
-
-```bash
-DATABASE_URL=postgresql+asyncpg://user:password@db.example.com:5432/service_processes
-```
+Deployed environments set the same `DB_*` variables. The connection URL is built from them, so the
+user and password don't need to be URL-encoded.
 
 `DB_CONNECT_TIMEOUT` (in seconds, default `10`) limits how long establishing a new connection may
-take, and also applies when `DATABASE_URL` is set. On startup, the application pings the database
-and fails if it is not reachable within this timeout.
+take. On startup, the application pings the database and fails if it is not reachable within this
+timeout.
 
 Endpoints can receive a request-scoped async session with `DatabaseSessionDep`:
 
@@ -84,7 +80,7 @@ created with the FastAPI lifespan and disposed during shutdown.
 The database schema is managed with [Alembic](https://alembic.sqlalchemy.org/). The ORM models live
 in `app/models/` and the migration scripts in `migrations/versions/`. There is no `alembic.ini`:
 Alembic is configured in the `[tool.alembic]` section of `pyproject.toml`, and the database
-connection is taken from the application settings (`DATABASE_URL` or `DB_*`, see above).
+connection is taken from the application settings (`DB_*`, see above).
 
 With the local database running (`make docker-compose-up`), apply all pending migrations:
 
@@ -281,7 +277,8 @@ the application starts. The docker image contains the migration scripts and Alem
 entrypoint is `uvicorn`, so the entrypoint must be overridden to run them:
 
 ```bash
-docker run --rm --env DATABASE_URL=... --entrypoint alembic <image> upgrade head
+docker run --rm --env DB_HOST=... --env DB_PORT=... --env DB_NAME=... --env DB_USER=... \
+    --env DB_PW=... --entrypoint alembic <image> upgrade head
 ```
 
 In Kubernetes, this can be done with an init container that uses the same image as the
@@ -296,22 +293,19 @@ spec:
         - name: db-migrations
           image: <registry>/swissgeo/service-processes:<version>
           command: ["alembic", "upgrade", "head"]
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: service-processes-db
-                  key: database-url
+          envFrom:
+            - secretRef:
+                name: service-processes-db
       containers:
         - name: service-processes
           image: <registry>/swissgeo/service-processes:<version>
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: service-processes-db
-                  key: database-url
+          envFrom:
+            - secretRef:
+                name: service-processes-db
 ```
+
+Here the `service-processes-db` secret contains the keys `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`
+and `DB_PW`.
 
 > [!WARNING]
 > An init container runs in every pod, so with several replicas the migrations may be started
