@@ -23,11 +23,11 @@ class Settings(BaseSettings):
     root_path: str = ""
 
     # Database settings
-    db_host: str = "localhost"
-    db_port: int = 15432
-    db_name: str = "service_processes"
-    db_user: str = "service_processes"
-    db_pw: SecretStr = SecretStr("service_processes")
+    db_host: str
+    db_port: int
+    db_name: str
+    db_user: str
+    db_pw: SecretStr
     # Timeout in seconds to establish a new connection
     db_connect_timeout: float = 10
 

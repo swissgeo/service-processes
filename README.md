@@ -78,9 +78,9 @@ created with the FastAPI lifespan and disposed during shutdown.
 ### Database Migrations
 
 The database schema is managed with [Alembic](https://alembic.sqlalchemy.org/). The ORM models live
-in `app/models/` and the migration scripts in `migrations/versions/`. There is no `alembic.ini`:
-Alembic is configured in the `[tool.alembic]` section of `pyproject.toml`, and the database
-connection is taken from the application settings (`DB_*`, see above).
+in `app/models/` and the migration scripts in `migrations/versions/`. Alembic is configured in
+`alembic.ini`, and the database connection is taken from the application settings (`DB_*`, see
+above).
 
 With the local database running (`make docker-compose-up`), apply all pending migrations:
 
@@ -281,9 +281,47 @@ docker run --rm --env DB_HOST=... --env DB_PORT=... --env DB_NAME=... --env DB_U
     --env DB_PW=... --entrypoint alembic <image> upgrade head
 ```
 
-In Kubernetes, this can be done with an init container that uses the same image as the
-application. Setting `command` overrides the image entrypoint, and the image working directory
-already contains the `pyproject.toml` with the Alembic configuration:
+If the application is deployed with ArgoCD, the best option is a `Job` that runs as a
+[PreSync hook](https://argo-cd.readthedocs.io/en/stable/user-guide/resource_hooks/). ArgoCD runs
+the job once per sync, before it applies the other manifests, and continues the sync only if the
+job succeeds. A failed migration therefore leaves the running version of the application
+untouched. Setting `command` overrides the image entrypoint, and the image working directory
+already contains the `alembic.ini` with the Alembic configuration:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: service-processes-db-migrations
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-migrations
+          image: <registry>/swissgeo/service-processes:<version>
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - secretRef:
+                name: service-processes-db
+```
+
+Here the `service-processes-db` secret contains the keys `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`
+and `DB_PW`. The `BeforeHookCreation` delete policy keeps the job (and its logs) until the next
+sync, which deletes it before creating it again.
+
+> [!WARNING]
+> PreSync hooks run before the other manifests of the application are applied. If the secret is
+> part of the same ArgoCD application, it does not exist yet on the first sync; it must then also
+> be created as a PreSync hook with a lower `argocd.argoproj.io/sync-wave`, or be managed outside
+> of the application.
+
+Without ArgoCD, this can be done with an init container that uses the same image as the
+application:
 
 ```yaml
 spec:
@@ -303,9 +341,6 @@ spec:
             - secretRef:
                 name: service-processes-db
 ```
-
-Here the `service-processes-db` secret contains the keys `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`
-and `DB_PW`.
 
 > [!WARNING]
 > An init container runs in every pod, so with several replicas the migrations may be started

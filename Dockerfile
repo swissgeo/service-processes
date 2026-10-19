@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY --chown=${USER}:${GROUP} app/ ${INSTALL_DIR}/app/
 COPY --chown=${USER}:${GROUP} migrations/ ${INSTALL_DIR}/migrations/
-COPY --chown=${USER}:${GROUP}  pyproject.toml ${INSTALL_DIR}/pyproject.toml
+COPY --chown=${USER}:${GROUP} alembic.ini ${INSTALL_DIR}/alembic.ini
 
 ###########################################################
 # Container to use in production

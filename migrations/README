@@ -1,3 +1,2 @@
-There is no alembic.ini: script_location and post_write_hooks are configured
-in the [tool.alembic] section of pyproject.toml. The database URL and logging
+Alembic is configured in alembic.ini at the root of the repository. The database URL and logging
 level are sourced from app/settings.py (see env.py) instead of ini directives

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 settings = get_settings()
 
-# There is no alembic.ini, so logging is configured here instead of via fileConfig().
+# alembic.ini has no logging sections, so logging is configured here instead of via fileConfig().
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("alembic").setLevel(logging.INFO)
 if settings.logging_handlers_level is not None:
