@@ -7,6 +7,8 @@ dynamic = ["version"]
 #===============================================================================
 # Dependencies
 dependencies = [
+    "alembic~=1.20",
+    "asyncpg~=0.31",
     "fastapi[standard]~=0.141",
     "httptools~=0.8",
     "opentelemetry-exporter-otlp~=1.44",
@@ -14,6 +16,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi~=0.65b0",
     "opentelemetry-sdk~=1.44",
     "pydantic-settings~=2.15",
+    "sqlalchemy[asyncio]~=2.1",
     "uvloop~=0.22",
 ]
 
@@ -91,6 +94,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # ruff ignore per files
 [tool.ruff.lint.per-file-ignores]
 
+"migrations/**" = ["INP001"] # Ignore missing __init__.py files
 
 "app/tests/**" = [
     "S101",    # Ignore usage of assert statements in tests

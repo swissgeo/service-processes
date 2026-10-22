@@ -1,0 +1,2 @@
+Alembic is configured in alembic.ini at the root of the repository. The database URL and logging
+level are sourced from app/settings.py (see env.py) instead of ini directives

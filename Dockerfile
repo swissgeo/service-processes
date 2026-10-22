@@ -40,6 +40,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 
 COPY --chown=${USER}:${GROUP} app/ ${INSTALL_DIR}/app/
+COPY --chown=${USER}:${GROUP} migrations/ ${INSTALL_DIR}/migrations/
+COPY --chown=${USER}:${GROUP} alembic.ini ${INSTALL_DIR}/alembic.ini
 
 ###########################################################
 # Container to use in production
