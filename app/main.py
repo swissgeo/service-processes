@@ -9,8 +9,9 @@ import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import internal
+from app.api import internal, process
 from app.api.internal import INTERNAL_TAG
+from app.api.process import PROCESS_TAG
 from app.core.database import check_database_connection, close_database, initialize_database
 from app.core.exceptions import register_exception_handlers
 from app.openapi import get_openapi_spec_url, setup_openapi
@@ -72,6 +73,7 @@ app = FastAPI(
     openapi_url=get_openapi_spec_url(),
     openapi_tags=[
         {"name": INTERNAL_TAG, "description": "Internal APIs not for external users"},
+        {"name": PROCESS_TAG, "description": "Process operations"},
     ],
     lifespan=lifespan,
     root_path=settings.root_path,
@@ -95,6 +97,7 @@ app.add_middleware(
 
 # Register routes
 app.include_router(internal.router)
+app.include_router(process.router)
 
 # Setup OTEL instrumentation
 initialize_instrumentation(app)
