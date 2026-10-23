@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Sequence
 from typing import Annotated
 
@@ -23,6 +24,10 @@ class ProcessService:
         )
         total = await self.session.scalar(select(func.count()).select_from(Process)) or 0
         return processes.all(), total
+
+    async def get_process(self, sgid: uuid.UUID) -> Process | None:
+        """Return the process with the given sgid, or None if it doesn't exist."""
+        return await self.session.scalar(select(Process).where(Process.sgid == sgid))
 
 
 # FastAPI dependency injection function and definitions

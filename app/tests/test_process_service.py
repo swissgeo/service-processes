@@ -1,3 +1,4 @@
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy import ClauseElement
@@ -61,6 +62,38 @@ async def test_list_processes_total_defaults_to_zero():
     _, total = await ProcessService(session).list_processes(limit=20, offset=0)
 
     assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_get_process_queries_by_sgid():
+    sgid = uuid.UUID("0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e")
+    session = AsyncMock(spec=AsyncSession)
+
+    await ProcessService(session).get_process(sgid)
+
+    statement = _compile(session.scalar.await_args.args[0])
+    assert "WHERE process.sgid = '0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e'" in statement
+
+
+@pytest.mark.asyncio
+async def test_get_process_returns_process():
+    process = Process(name="A")
+    session = AsyncMock(spec=AsyncSession)
+    session.scalar.return_value = process
+
+    result = await ProcessService(session).get_process(uuid.uuid7())
+
+    assert result is process
+
+
+@pytest.mark.asyncio
+async def test_get_process_returns_none_when_not_found():
+    session = AsyncMock(spec=AsyncSession)
+    session.scalar.return_value = None
+
+    result = await ProcessService(session).get_process(uuid.uuid7())
+
+    assert result is None
 
 
 def test_get_process_service_uses_session():

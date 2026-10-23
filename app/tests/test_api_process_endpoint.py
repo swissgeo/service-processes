@@ -95,3 +95,34 @@ def test_list_processes_pagination(
     assert response.json()["limit"] == expected_limit
     assert response.json()["offset"] == expected_offset
     process_service.list_processes.assert_awaited_once_with(expected_limit, expected_offset)
+
+
+def test_get_process(client: TestClient, process_service: AsyncMock):
+    process_service.get_process.return_value = PROCESS
+
+    response = client.get(f"/processes/{PROCESS.sgid}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "sgid": "0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e",
+        "name": "Dummy export",
+        "description": "Dummy process",
+        "inputs": {"type": "object", "properties": {"startDate": {"type": "string"}}},
+    }
+    process_service.get_process.assert_awaited_once_with(PROCESS.sgid)
+
+
+def test_get_process_not_found(client: TestClient, process_service: AsyncMock):
+    process_service.get_process.return_value = None
+
+    response = client.get(f"/processes/{uuid.uuid7()}")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "Not Found", "message": "Process not found"}
+
+
+def test_get_process_invalid_sgid(client: TestClient, process_service: AsyncMock):
+    response = client.get("/processes/not-a-uuid")
+
+    assert response.status_code == 400
+    process_service.get_process.assert_not_awaited()
