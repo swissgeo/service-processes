@@ -3,8 +3,13 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.process_service import ProcessServiceDep
-from app.schemas.pagination import PaginationParams
-from app.schemas.process import ListProcessesResponse, Process, ProcessResponse, sgid
+from app.schemas.process import (
+    ListProcessesParams,
+    ListProcessesResponse,
+    Process,
+    ProcessResponse,
+    sgid,
+)
 
 PROCESS_TAG = "Process"
 
@@ -13,15 +18,15 @@ router = APIRouter(tags=[PROCESS_TAG])
 
 @router.get("/processes", summary="List all processes")
 async def list_processes(
-    service: ProcessServiceDep, pagination: Annotated[PaginationParams, Query()]
+    service: ProcessServiceDep, params: Annotated[ListProcessesParams, Query()]
 ) -> ListProcessesResponse:
-    """List all processes, paginated."""
-    processes, total = await service.list_processes(pagination.limit, pagination.offset)
+    """List all processes of the given datasets, paginated."""
+    processes, total = await service.list_processes(params.datasets, params.limit, params.offset)
     return ListProcessesResponse(
         items=[Process.from_model(p) for p in processes],
         total=total,
-        limit=pagination.limit,
-        offset=pagination.offset,
+        limit=params.limit,
+        offset=params.offset,
     )
 
 
