@@ -20,6 +20,7 @@ def settings() -> Settings:
         cors_origins=["http://test.com", "https://hello.com"],
         cors_origin_regex=r"http://localhost:\d+",
         root_path="",
+        doc_prefix_path="",
         otel_sdk_disabled=True,
         publish_openapi_spec=True,
     )

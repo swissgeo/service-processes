@@ -34,12 +34,14 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("CORS_HEADERS", raising=False)
     monkeypatch.delenv("CORS_MAX_AGE", raising=False)
     monkeypatch.delenv("DB_CONNECT_TIMEOUT", raising=False)
+    monkeypatch.delenv("DOC_PREFIX_PATH", raising=False)
 
     settings = Settings(
         _env_file=None,
     )
 
     assert settings.root_path == ""
+    assert settings.doc_prefix_path == ""
     assert settings.cors_origins == []
     assert settings.cors_method == ["GET", "POST"]
     assert settings.cors_headers == ["*"]
@@ -98,6 +100,27 @@ def test_env_overrides_simple_values(monkeypatch: pytest.MonkeyPatch):
     )
 
     assert settings.root_path == "/weird/path"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("", ""),
+        ("/", ""),
+        ("specs", "/specs"),
+        ("/specs", "/specs"),
+        ("/specs/", "/specs"),
+        ("/api/specs/", "/api/specs"),
+    ],
+)
+def test_doc_prefix_path_is_normalized(monkeypatch: pytest.MonkeyPatch, value: str, expected: str):
+    monkeypatch.setenv("DOC_PREFIX_PATH", value)
+
+    settings = Settings(
+        _env_file=None,
+    )
+
+    assert settings.doc_prefix_path == expected
 
 
 def test_parse_list_from_comma_separated_string(monkeypatch: pytest.MonkeyPatch):

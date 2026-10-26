@@ -180,6 +180,10 @@ And then open:
 - [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for Swagger
 - [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc) for Redoc
 
+All docs related paths (`openapi.json`, `docs`, `redoc` and their `internal/` variants) can be
+prefixed with the `DOC_PREFIX_PATH` setting, e.g. `DOC_PREFIX_PATH=/specs` serves Swagger under
+`/specs/docs`.
+
 ## Observability
 
 The service supports OpenTelemetry logging, tracing, and metrics.

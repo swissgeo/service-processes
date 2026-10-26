@@ -4,10 +4,11 @@ The public spec exposes routes intended for external consumers,
 the internal spec exposes routes tagged as internal.
 Both specs strip the auto-generated 422 responses as they are
 overwritten to 400 by custom exceptionhandlers.
+
+All docs related paths are prefixed with the DOC_PREFIX_PATH setting.
 """
 
 import json
-from functools import lru_cache
 from typing import Any
 
 from fastapi import FastAPI, Response, routing
@@ -18,9 +19,12 @@ from fastapi.responses import HTMLResponse
 from app.api.internal import INTERNAL_TAG
 from app.settings import get_settings
 
-_INTERNAL_SPEC_PREFIX = "internal"
-_INTERNAL_SPEC_URL = f"/{_INTERNAL_SPEC_PREFIX}/openapi.json"
-_SPEC_URL = "/openapi.json"
+_INTERNAL_SPEC_PREFIX = "/internal"
+
+
+def doc_path(path: str) -> str:
+    """Return the given docs path prefixed with the DOC_PREFIX_PATH setting."""
+    return f"{get_settings().doc_prefix_path}{path}"
 
 
 def _remove_422(schema: dict[str, Any]) -> None:
@@ -79,14 +83,16 @@ def _build_internal_schema(app: FastAPI) -> dict[str, Any]:
 def setup_openapi(app: FastAPI) -> None:
     """Configure split OpenAPI specs and register internal doc endpoints.
 
-    The default spec (/docs, /openapi.json) excludes Internal-tagged routes.
-    The internal spec (/internal/openapi.json, /internal/docs, /internal/redoc)
-    contains only Internal-tagged routes.
+    The default spec ({prefix}/openapi.json, {prefix}/docs, {prefix}/redoc) excludes
+    Internal-tagged routes.
+    The internal spec ({prefix}/internal/openapi.json, {prefix}/internal/docs,
+    {prefix}/internal/redoc) contains only Internal-tagged routes.
 
     Also removes 422 responses replaced by 400 via our exception handler.
     See https://github.com/fastapi/fastapi/discussions/6695
     """
     _internal_schema: dict[str, Any] | None = None
+    internal_spec_url = doc_path(f"{_INTERNAL_SPEC_PREFIX}/openapi.json")
 
     def custom_openapi() -> dict[str, Any]:
         if app.openapi_schema:
@@ -102,23 +108,23 @@ def setup_openapi(app: FastAPI) -> None:
 
     app.openapi = custom_openapi  # ty:ignore[invalid-assignment]
 
-    @app.get(_INTERNAL_SPEC_URL, include_in_schema=False)
+    @app.get(internal_spec_url, include_in_schema=False)
     async def internal_openapi_schema() -> Response:
         return Response(content=json.dumps(internal_openapi()), media_type="application/json")
 
-    @app.get(f"/{_INTERNAL_SPEC_PREFIX}/docs", include_in_schema=False)
+    @app.get(doc_path(f"{_INTERNAL_SPEC_PREFIX}/docs"), include_in_schema=False)
     async def internal_docs() -> HTMLResponse:
         return get_swagger_ui_html(
-            openapi_url=_INTERNAL_SPEC_URL, title=f"{app.title} - Internal Docs"
+            openapi_url=internal_spec_url, title=f"{app.title} - Internal Docs"
         )
 
-    @app.get(f"/{_INTERNAL_SPEC_PREFIX}/redoc", include_in_schema=False)
+    @app.get(doc_path(f"{_INTERNAL_SPEC_PREFIX}/redoc"), include_in_schema=False)
     async def internal_redoc() -> HTMLResponse:
-        return get_redoc_html(openapi_url=_INTERNAL_SPEC_URL, title=f"{app.title} - Internal Docs")
+        return get_redoc_html(openapi_url=internal_spec_url, title=f"{app.title} - Internal Docs")
 
 
-@lru_cache
-def get_openapi_spec_url() -> str | None:
+def get_published_doc_path(path: str) -> str | None:
+    """Return the prefixed docs path, or None (disabled) when the OpenAPI spec is not published."""
     if get_settings().publish_openapi_spec:
-        return _SPEC_URL
+        return doc_path(path)
     return None  # pragma: no cover

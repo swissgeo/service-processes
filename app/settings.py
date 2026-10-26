@@ -45,6 +45,14 @@ class Settings(BaseSettings):
 
     # OpenAPI settings
     publish_openapi_spec: bool = False
+    # Prefix for all docs related paths (openapi.json, docs, redoc and their internal variants)
+    doc_prefix_path: str = ""
+
+    @field_validator("doc_prefix_path")
+    @classmethod
+    def normalize_path_prefix(cls, v: str) -> str:
+        v = v.strip("/")
+        return f"/{v}" if v else ""
 
     # CORS settings
     cors_origins: list[str] = []
