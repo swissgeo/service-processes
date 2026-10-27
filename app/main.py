@@ -14,7 +14,7 @@ from app.api.internal import INTERNAL_TAG
 from app.api.process import PROCESS_TAG
 from app.core.database import check_database_connection, close_database, initialize_database
 from app.core.exceptions import register_exception_handlers
-from app.openapi import get_openapi_spec_url, setup_openapi
+from app.openapi import get_published_doc_path, setup_openapi
 from app.otel import initialize_instrumentation, shutdown_otel
 from app.settings import get_settings
 from app.version import __version__
@@ -70,7 +70,10 @@ app = FastAPI(
         "name": "BSD 3-Clause License",
         "identifier": "BSD-3-Clause",
     },
-    openapi_url=get_openapi_spec_url(),
+    openapi_url=get_published_doc_path("/openapi.json"),
+    docs_url=get_published_doc_path("/docs"),
+    swagger_ui_oauth2_redirect_url=get_published_doc_path("/docs/oauth2-redirect"),
+    redoc_url=get_published_doc_path("/redoc"),
     openapi_tags=[
         {"name": INTERNAL_TAG, "description": "Internal APIs not for external users"},
         {"name": PROCESS_TAG, "description": "Process operations"},
