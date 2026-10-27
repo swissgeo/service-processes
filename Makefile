@@ -3,7 +3,7 @@ SHELL = /bin/bash
 .DEFAULT_GOAL := help
 
 SERVICE_NAME := service-processes
-HTTP_PORT ?= 8000
+HTTP_PORT ?= 8080
 
 CURRENT_DIR := $(shell pwd)
 

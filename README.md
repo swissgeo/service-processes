@@ -180,6 +180,18 @@ And then open:
 - [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for Swagger
 - [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc) for Redoc
 
+### Authorization during local development
+
+In production the service runs behind oauth2-proxy, which sets the `X-Auth-Request-*` headers
+(e.g. the access token used for authorization). Locally, these headers are set by the nginx of
+`docker-compose.yml`, which listens on port `8000` and forwards to the app on port `8080`. So use
+port `8000`, requesting the app directly on port `8080` results in `401 Unauthorized` on protected
+endpoints.
+
+With `USE_LOCAL_VERIFIED_PERMISSIONS=true` (default in `.env.default`), AWS Verified Permissions is
+replaced by a dummy authorizer allowing all requests. The dummy is not part of the docker image, so
+`make dockerrun` requires `USE_LOCAL_VERIFIED_PERMISSIONS=false` and access to a real policy store.
+
 All docs related paths (`openapi.json`, `docs`, `redoc` and their `internal/` variants) can be
 prefixed with the `DOC_PREFIX_PATH` setting, e.g. `DOC_PREFIX_PATH=/specs` serves Swagger under
 `/specs/docs`.

@@ -7,10 +7,20 @@ from fastapi.testclient import TestClient
 
 import pytest
 
+from app.core.authorization import (
+    Action,
+    AuthorizationError,
+    VerifiedPermissionsAuthorizer,
+    get_authorizer,
+    process_resource,
+)
 from app.core.process_service import ProcessService, get_process_service
 from app.models.process import Process
 from app.schemas.pagination import DEFAULT_LIMIT, MAX_LIMIT
 from app.schemas.process import MAX_DATASETS
+
+TOKEN = "header.payload.signature"  # noqa: S105
+AUTH_HEADERS = {"X-Auth-Request-Access-Token": TOKEN}
 
 DATASET = uuid.UUID("0195f3a2-7c1e-7b3a-9d4e-000000000001")
 
@@ -36,6 +46,16 @@ def process_service(app: FastAPI) -> Generator[AsyncMock]:
     app.dependency_overrides[get_process_service] = lambda: service
     yield service
     app.dependency_overrides.pop(get_process_service)
+
+
+@pytest.fixture
+def authorizer(app: FastAPI) -> Generator[AsyncMock]:
+    """Replace the authorizer by a mock allowing everything, so that the tests don't call AWS."""
+    authorizer = AsyncMock(spec=VerifiedPermissionsAuthorizer)
+    authorizer.is_authorized.return_value = True
+    app.dependency_overrides[get_authorizer] = lambda: authorizer
+    yield authorizer
+    app.dependency_overrides.pop(get_authorizer)
 
 
 def test_list_processes(client: TestClient, process_service: AsyncMock):
@@ -140,10 +160,10 @@ def test_list_processes_invalid_datasets(
     process_service.list_processes.assert_not_awaited()
 
 
-def test_get_process(client: TestClient, process_service: AsyncMock):
+def test_get_process(client: TestClient, process_service: AsyncMock, authorizer: AsyncMock):
     process_service.get_process.return_value = PROCESS
 
-    response = client.get(f"/processes/{PROCESS.sgid}")
+    response = client.get(f"/processes/{PROCESS.sgid}", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     assert response.json() == {
@@ -153,19 +173,62 @@ def test_get_process(client: TestClient, process_service: AsyncMock):
         "inputs": {"type": "object", "properties": {"startDate": {"type": "string"}}},
     }
     process_service.get_process.assert_awaited_once_with(PROCESS.sgid)
+    authorizer.is_authorized.assert_awaited_once_with(
+        TOKEN, Action.GET_PROCESS, process_resource(PROCESS)
+    )
 
 
-def test_get_process_not_found(client: TestClient, process_service: AsyncMock):
+def test_get_process_forbidden(
+    client: TestClient, process_service: AsyncMock, authorizer: AsyncMock
+):
+    process_service.get_process.return_value = PROCESS
+    authorizer.is_authorized.return_value = False
+
+    response = client.get(f"/processes/{PROCESS.sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "Forbidden", "message": "Forbidden"}
+
+
+def test_get_process_authorization_unavailable(
+    client: TestClient, process_service: AsyncMock, authorizer: AsyncMock
+):
+    process_service.get_process.return_value = PROCESS
+    authorizer.is_authorized.side_effect = AuthorizationError("unavailable")
+
+    response = client.get(f"/processes/{PROCESS.sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 503
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-Auth-Request-Access-Token": ""}])
+def test_get_process_missing_token(
+    client: TestClient, process_service: AsyncMock, authorizer: AsyncMock, headers: dict
+):
+    process_service.get_process.return_value = PROCESS
+
+    response = client.get(f"/processes/{PROCESS.sgid}", headers=headers)
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "Unauthorized", "message": "Missing access token"}
+    authorizer.is_authorized.assert_not_awaited()
+
+
+def test_get_process_not_found(
+    client: TestClient, process_service: AsyncMock, authorizer: AsyncMock
+):
     process_service.get_process.return_value = None
 
-    response = client.get(f"/processes/{uuid.uuid7()}")
+    response = client.get(f"/processes/{uuid.uuid7()}", headers=AUTH_HEADERS)
 
     assert response.status_code == 404
     assert response.json() == {"error": "Not Found", "message": "Process not found"}
+    authorizer.is_authorized.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("authorizer")
 def test_get_process_invalid_sgid(client: TestClient, process_service: AsyncMock):
-    response = client.get("/processes/not-a-uuid")
+    response = client.get("/processes/not-a-uuid", headers=AUTH_HEADERS)
 
     assert response.status_code == 400
     process_service.get_process.assert_not_awaited()

@@ -10,7 +10,7 @@ services:
       DB_PW: ${DB_PW}
     volumes:
       - ./.volumes/postgresql:/var/lib/postgresql
-      - ./init-app-database.sh:/docker-entrypoint-initdb.d/init-app-database.sh:ro
+      - ./docker/init-app-database.sh:/docker-entrypoint-initdb.d/init-app-database.sh:ro
     ports:
       - "${DB_PORT}:5432"
     healthcheck:
@@ -23,7 +23,7 @@ services:
     image: otel/opentelemetry-collector-contrib:latest
     command: --config otel-local-config.yaml
     volumes:
-      - ./otel-local-config.yaml:/otel-local-config.yaml
+      - ./docker/otel-local-config.yaml:/otel-local-config.yaml
     ports:
       - "4317:4317"
     depends_on:
@@ -48,9 +48,16 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - network_local
+
+  # Sets the oauth2-proxy headers for local development, see README
+  nginx:
+    image: nginx:stable-alpine
+    network_mode: host
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
 networks:
   network_local:

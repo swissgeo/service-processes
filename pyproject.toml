@@ -9,6 +9,7 @@ dynamic = ["version"]
 dependencies = [
     "alembic~=1.20",
     "asyncpg~=0.31",
+    "boto3~=1.40",
     "fastapi[standard]~=0.141",
     "httptools~=0.8",
     "opentelemetry-exporter-otlp~=1.44",
@@ -35,6 +36,11 @@ dev = [
 # uv configuration
 [tool.uv]
 package = false # Do not install as a package
+
+# uv still builds the project metadata (because of the dynamic version), which fails with the
+# setuptools auto discovery as there are multiple top-level packages (app, migrations).
+[tool.setuptools]
+packages = []
 
 #===============================================================================
 # FastAPI configuration
