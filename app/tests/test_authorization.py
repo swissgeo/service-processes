@@ -121,6 +121,8 @@ async def test_is_authorized_sends_token_action_and_entities(
     [
         decision("DENY"),
         decision("DENY", [{"errorDescription": "policy evaluation failed"}]),
+        # An erroring forbid policy is skipped by Cedar, so ALLOW with errors must be denied
+        decision("ALLOW", [{"errorDescription": "policy evaluation failed"}]),
     ],
 )
 async def test_is_authorized_denied(
@@ -194,6 +196,26 @@ async def test_batch_is_authorized_sends_requests_and_deduplicated_entities(
     )
 
     assert await authorizer.batch_is_authorized(TOKEN, Action.GET_PROCESS, [allowed, denied]) == [
+        allowed
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_is_authorized_denies_allow_with_errors(
+    stubber: Stubber, authorizer: VerifiedPermissionsAuthorizer
+):
+    erroring, allowed = (Resource(VPEntityType.PROCESS, uuid.uuid7()) for _ in range(2))
+    stubber.add_response(
+        "batch_is_authorized_with_token",
+        {
+            "results": [
+                batch_result(erroring, "ALLOW", [{"errorDescription": "policy evaluation failed"}]),
+                batch_result(allowed, "ALLOW"),
+            ]
+        },
+    )
+
+    assert await authorizer.batch_is_authorized(TOKEN, Action.GET_PROCESS, [erroring, allowed]) == [
         allowed
     ]
 

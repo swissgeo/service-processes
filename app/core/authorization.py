@@ -125,16 +125,21 @@ class VerifiedPermissionsAuthorizer:
         except (ClientError, BotoCoreError) as error:
             raise AuthorizationError(str(error)) from error
 
+        # Cedar skips policies that fail to evaluate, so an erroring forbid policy could turn a
+        # DENY into an ALLOW. The decision cannot be trusted, deny instead.
         if response["errors"]:
-            logger.warning(
-                "Errors while evaluating policies for %s on %s: %s",
+            logger.error(
+                "Errors while evaluating policies for %s on %s, denying: %s",
                 action,
                 resource,
                 response["errors"],
             )
+            return False
         return response["decision"] == "ALLOW"
 
-    _MAX_BATCH_SIZE = 30  # limit of BatchIsAuthorizedWithToken
+    # Hard limit of verified permissions for number of requests per Batch.
+    # https://docs.aws.amazon.com/verifiedpermissions/latest/apireference/API_BatchIsAuthorizedWithToken.html
+    _MAX_BATCH_SIZE = 30
 
     async def batch_is_authorized(
         self, token: str, action: Action, resources: list[Resource]
@@ -174,13 +179,15 @@ class VerifiedPermissionsAuthorizer:
         allowed = []
         for result in response["results"]:
             entity_id = result["request"]["resource"]["entityId"]
+            # See is_authorized: the decision cannot be trusted if any policy errored
             if result["errors"]:
-                logger.warning(
-                    "Errors while evaluating policies for %s on %s: %s",
+                logger.error(
+                    "Errors while evaluating policies for %s on %s, denying: %s",
                     action,
                     entity_id,
                     result["errors"],
                 )
+                continue
             if result["decision"] == "ALLOW":
                 allowed.append(by_identifier[entity_id])
         return allowed
