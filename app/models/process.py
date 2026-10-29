@@ -11,7 +11,11 @@ from app.models.base import Base
 
 
 class Process(Base):
-    """A process that users can run, backed by an Airflow DAG."""
+    """A process that users can run, backed by an Airflow DAG.
+    There is no check that all processes of a dataset have the same unit and organization, but this
+    should be the case. These are only used for authorization checks. At some point we could split
+    this into a separate table for (or best read it from an outside cache). But for now we keep it
+    as is."""
 
     __tablename__ = "process"
     __table_args__ = (UniqueConstraint("organization_sgid", "name"),)

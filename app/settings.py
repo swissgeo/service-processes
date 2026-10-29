@@ -43,6 +43,17 @@ class Settings(BaseSettings):
             database=self.db_name,
         ).render_as_string(hide_password=False)
 
+    # AWS Verified Permissions settings
+    avp_policy_store_id: str
+    # Cedar namespace of the entity and action types in the policy store schema
+    avp_namespace: str
+    # Keep timeouts short as authorization is called within each request
+    avp_connect_timeout: float = 2  # seconds
+    avp_read_timeout: float = 5  # seconds
+
+    # Only set for local development to "skip" authorization
+    use_local_verified_permissions: bool = False
+
     # OpenAPI settings
     publish_openapi_spec: bool = False
     # Prefix for all docs related paths (openapi.json, docs, redoc and their internal variants)

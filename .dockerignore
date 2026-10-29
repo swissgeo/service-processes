@@ -28,6 +28,10 @@ tests/
 *.pytest_cache/
 .coverage
 test_*
+app/tests
+
+# Local development only, MUST NOT be in image
+app/local_dev
 
 # IDE/editor files
 .vscode/

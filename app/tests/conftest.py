@@ -9,6 +9,21 @@ import pytest
 from app.settings import Settings, get_settings
 
 
+@pytest.fixture(autouse=True)
+def required_avp_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The Verified Permissions settings have no defaults, so set them for all tests to not depend
+    # on the local environment. boto3 resolves the region and credentials when creating the client
+    # on startup, so set dummy ones to not depend on the local AWS configuration.
+    monkeypatch.setenv("AVP_POLICY_STORE_ID", "test-policy-store")
+    monkeypatch.setenv("AVP_NAMESPACE", "Test")
+    # .env.default enables the local dummy authorizer, tests must use the real one by default
+    monkeypatch.setenv("USE_LOCAL_VERIFIED_PERMISSIONS", "false")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-central-1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+
+
 @pytest.fixture
 def settings() -> Settings:
     """Fixture to provide application settings for testing."""
