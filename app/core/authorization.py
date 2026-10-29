@@ -22,6 +22,7 @@ class Action(StrEnum):
     """Actions defined in the policy store schema."""
 
     GET_PROCESS = "getProcess"
+    LIST_PROCESSES = "listProcesses"
 
 
 class VPEntityType(StrEnum):
@@ -57,6 +58,17 @@ def process_resource(process: Process) -> Resource:
     return Resource(VPEntityType.PROCESS, process.sgid, dataset)
 
 
+def dataset_resource(
+    dataset_sgid: uuid.UUID,
+    organization_unit_sgid: uuid.UUID,
+    organization_sgid: uuid.UUID,
+) -> Resource:
+    """Return the dataset as resource: Dataset -> Unit -> Organization."""
+    organization = Resource(VPEntityType.ORGANIZATION, organization_sgid)
+    organization_unit = Resource(VPEntityType.UNIT, organization_unit_sgid, organization)
+    return Resource(VPEntityType.DATASET, dataset_sgid, organization_unit)
+
+
 class AuthorizationError(Exception):
     """The authorization decision could not be made."""
 
@@ -64,6 +76,12 @@ class AuthorizationError(Exception):
 class Authorizer(Protocol):
     async def is_authorized(self, token: str, action: Action, resource: Resource) -> bool:
         """Return whether the principal of the token may perform the action on the resource."""
+        ...
+
+    async def batch_is_authorized(
+        self, token: str, action: Action, resources: list[Resource]
+    ) -> list[Resource]:
+        """Return the resources on which the principal of the token may perform the action."""
         ...
 
 
@@ -82,13 +100,15 @@ class VerifiedPermissionsAuthorizer:
     def _identifier(self, resource: Resource) -> dict[str, str]:
         return {"entityType": f"{self._namespace}::{resource.type}", "entityId": str(resource.id)}
 
-    def _entities(self, resource: Resource) -> list[dict[str, Any]]:
+    def _entities(self, *resources: Resource) -> list[dict[str, Any]]:
+        # Resources can share ancestors, dict.fromkeys removes duplicates while keeping the order
+        unique = dict.fromkeys(r for resource in resources for r in resource.hierarchy())
         return [
             {
                 "identifier": self._identifier(r),
                 "parents": [self._identifier(r.parent)] if r.parent else [],
             }
-            for r in resource.hierarchy()
+            for r in unique
         ]
 
     async def is_authorized(self, token: str, action: Action, resource: Resource) -> bool:
@@ -113,6 +133,57 @@ class VerifiedPermissionsAuthorizer:
                 response["errors"],
             )
         return response["decision"] == "ALLOW"
+
+    _MAX_BATCH_SIZE = 30  # limit of BatchIsAuthorizedWithToken
+
+    async def batch_is_authorized(
+        self, token: str, action: Action, resources: list[Resource]
+    ) -> list[Resource]:
+        """Return the resources on which the principal of the token may perform the action."""
+        allowed: list[Resource] = []
+        for start in range(0, len(resources), self._MAX_BATCH_SIZE):
+            allowed.extend(
+                await self._batch_is_authorized(
+                    token, action, resources[start : start + self._MAX_BATCH_SIZE]
+                )
+            )
+        return allowed
+
+    async def _batch_is_authorized(
+        self, token: str, action: Action, resources: list[Resource]
+    ) -> list[Resource]:
+        by_identifier = {str(resource.id): resource for resource in resources}
+        try:
+            # boto3 is synchronous, so run it in the threadpool to not block the event loop
+            response = await run_in_threadpool(
+                self._client.batch_is_authorized_with_token,
+                policyStoreId=self._policy_store_id,
+                accessToken=token,
+                requests=[
+                    {
+                        "action": {"actionType": f"{self._namespace}::Action", "actionId": action},
+                        "resource": self._identifier(resource),
+                    }
+                    for resource in resources
+                ],
+                entities={"entityList": self._entities(*resources)},
+            )
+        except (ClientError, BotoCoreError) as error:
+            raise AuthorizationError(str(error)) from error
+
+        allowed = []
+        for result in response["results"]:
+            entity_id = result["request"]["resource"]["entityId"]
+            if result["errors"]:
+                logger.warning(
+                    "Errors while evaluating policies for %s on %s: %s",
+                    action,
+                    entity_id,
+                    result["errors"],
+                )
+            if result["decision"] == "ALLOW":
+                allowed.append(by_identifier[entity_id])
+        return allowed
 
 
 def initialize_authorizer(app: FastAPI, settings: Settings) -> None:
@@ -171,22 +242,11 @@ def get_access_token(
 AccessTokenDep = Annotated[str, Depends(get_access_token)]
 
 
-async def authorize(authorizer: Authorizer, token: str, action: Action, resource: Resource) -> None:
-    """Raise an HTTPException unless the principal of the token is allowed to perform the action.
+class Authorization:
+    """Authorizes actions of the principal of the request's access token.
 
     Fails closed: if no decision can be made, the request is rejected.
     """
-    try:
-        allowed = await authorizer.is_authorized(token, action, resource)
-    except AuthorizationError:
-        logger.exception("Authorization of %s on %s failed", action, resource)
-        raise HTTPException(status_code=503, detail="Authorization unavailable") from None
-    if not allowed:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-
-class Authorization:
-    """Authorizes actions of the principal of the request's access token."""
 
     def __init__(self, authorizer: Authorizer, token: str) -> None:
         self._authorizer = authorizer
@@ -194,7 +254,21 @@ class Authorization:
 
     async def require(self, action: Action, resource: Resource) -> None:
         """Raise an HTTPException unless the principal may perform the action on the resource."""
-        await authorize(self._authorizer, self._token, action, resource)
+        try:
+            allowed = await self._authorizer.is_authorized(self._token, action, resource)
+        except AuthorizationError:
+            logger.exception("Authorization of %s on %s failed", action, resource)
+            raise HTTPException(status_code=503) from None
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    async def filter(self, action: Action, resources: list[Resource]) -> list[Resource]:
+        """Return the resources on which the principal may perform the action."""
+        try:
+            return await self._authorizer.batch_is_authorized(self._token, action, resources)
+        except AuthorizationError:
+            logger.exception("Batch authorization of %s failed", action)
+            raise HTTPException(status_code=503) from None
 
 
 def get_authorization(authorizer: AuthorizerDep, token: AccessTokenDep) -> Authorization:

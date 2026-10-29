@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.core.authorization import Action, AuthorizationDep, process_resource
+from app.core.authorization import Action, AuthorizationDep, dataset_resource, process_resource
 from app.core.process_service import ProcessServiceDep
 from app.schemas.process import (
     ListProcessesParams,
@@ -19,10 +19,18 @@ router = APIRouter(tags=[PROCESS_TAG])
 
 @router.get("/processes", summary="List all processes")
 async def list_processes(
-    service: ProcessServiceDep, params: Annotated[ListProcessesParams, Query()]
+    service: ProcessServiceDep,
+    authorization: AuthorizationDep,
+    params: Annotated[ListProcessesParams, Query()],
 ) -> ListProcessesResponse:
-    """List all processes of the given datasets, paginated."""
-    processes, total = await service.list_processes(params.datasets, params.limit, params.offset)
+    """List all processes of the given datasets the user may access, paginated."""
+    owner_ids = await service.get_datasets(params.datasets)
+    allowed = await authorization.filter(
+        Action.LIST_PROCESSES, [dataset_resource(*ids) for ids in owner_ids]
+    )
+    processes, total = await service.list_processes(
+        [dataset.id for dataset in allowed], params.limit, params.offset
+    )
     return ListProcessesResponse(
         items=[Process.from_model(p) for p in processes],
         total=total,

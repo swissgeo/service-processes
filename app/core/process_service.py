@@ -35,6 +35,17 @@ class ProcessService:
         """Return the process with the given sgid, or None if it doesn't exist."""
         return await self.session.scalar(select(Process).where(Process.sgid == sgid))
 
+    async def get_datasets(
+        self, dataset_sgids: Sequence[uuid.UUID]
+    ) -> Sequence[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """Get tuple of (dataset, unit, organization) of provided datasets."""
+        rows = await self.session.execute(
+            select(Process.dataset_sgid, Process.organization_unit_sgid, Process.organization_sgid)
+            .where(Process.dataset_sgid.in_(dataset_sgids))
+            .distinct()
+        )
+        return rows.tuples().all()
+
 
 # FastAPI dependency injection function and definitions
 def get_process_service(session: DatabaseSessionDep) -> ProcessService:

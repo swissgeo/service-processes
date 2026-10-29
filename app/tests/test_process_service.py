@@ -119,6 +119,34 @@ async def test_get_process_returns_none_when_not_found():
     assert result is None
 
 
+@pytest.mark.asyncio
+async def test_get_datasets_queries_distinct_hierarchy_of_datasets():
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = MagicMock()
+
+    await ProcessService(session).get_datasets([DATASET])
+
+    statement = _compile(session.execute.await_args.args[0])
+    assert statement == (
+        "SELECT DISTINCT process.dataset_sgid, process.organization_unit_sgid, "
+        "process.organization_sgid \nFROM process \n"
+        "WHERE process.dataset_sgid IN ('0195f3a2-7c1e-7b3a-9d4e-000000000001')"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_datasets_returns_tuples():
+    rows = [(DATASET, uuid.uuid7(), uuid.uuid7())]
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = MagicMock(
+        tuples=MagicMock(return_value=MagicMock(all=MagicMock(return_value=rows)))
+    )
+
+    result = await ProcessService(session).get_datasets([DATASET])
+
+    assert result == rows
+
+
 def test_get_process_service_uses_session():
     session = AsyncMock(spec=AsyncSession)
 
