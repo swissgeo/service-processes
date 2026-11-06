@@ -8,6 +8,7 @@ dynamic = ["version"]
 # Dependencies
 dependencies = [
     "alembic~=1.20",
+    "apache-airflow-client~=3.3",
     "asyncpg~=0.31",
     "boto3~=1.40",
     "fastapi[standard]~=0.141",
