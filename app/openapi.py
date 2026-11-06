@@ -106,7 +106,7 @@ def setup_openapi(app: FastAPI) -> None:
             _internal_schema = _build_internal_schema(app)
         return _internal_schema
 
-    app.openapi = custom_openapi  # ty:ignore[invalid-assignment]
+    app.openapi = custom_openapi
 
     @app.get(internal_spec_url, include_in_schema=False)
     async def internal_openapi_schema() -> Response:
