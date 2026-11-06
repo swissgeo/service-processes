@@ -57,6 +57,20 @@ wheels = [
 ]
 
 [[package]]
+name = "apache-airflow-client"
+version = "3.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ec/ae/0c5781f0aba5d5e12b3bdc02ec5fa2bb5950e25bb6cfe5ee961042aabebd/apache_airflow_client-3.3.2.tar.gz", hash = "sha256:e9bb8de3717bb3a62a2efa4d31458b35683d775e91c5667f8697df7847baeb49", size = 287183, upload-time = "2026-09-21T14:15:38.244Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4b/0e/013342081123c855420210ace6a76252e2d8e6abeb8ab1e8066ce8fdcd0a/apache_airflow_client-3.3.2-py3-none-any.whl", hash = "sha256:5d5c591b10d579b9382cfa04d2b5b9cc43a47cf51dac560d4efb6ddc092f4593", size = 569666, upload-time = "2026-09-21T14:15:32.924Z" },
+]
+
+[[package]]
 name = "asgiref"
 version = "3.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1648,6 +1662,7 @@ name = "service-processes"
 source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
+    { name = "apache-airflow-client" },
     { name = "asyncpg" },
     { name = "boto3" },
     { name = "fastapi", extra = ["standard"] },
@@ -1675,6 +1690,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = "~=1.20" },
+    { name = "apache-airflow-client", specifier = "~=3.3" },
     { name = "asyncpg", specifier = "~=0.31" },
     { name = "boto3", specifier = "~=1.40" },
     { name = "fastapi", extras = ["standard"], specifier = "~=0.141" },
