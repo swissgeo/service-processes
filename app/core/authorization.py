@@ -1,5 +1,4 @@
 import logging
-import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -39,7 +38,7 @@ class Resource:
     """An entity of the policy store schema together with its parent."""
 
     type: VPEntityType
-    id: uuid.UUID
+    id: str
     parent: Resource | None = None
 
     def hierarchy(self) -> Iterator[Resource]:
@@ -59,9 +58,9 @@ def process_resource(process: Process) -> Resource:
 
 
 def dataset_resource(
-    dataset_sgid: uuid.UUID,
-    organization_unit_sgid: uuid.UUID,
-    organization_sgid: uuid.UUID,
+    dataset_sgid: str,
+    organization_unit_sgid: str,
+    organization_sgid: str,
 ) -> Resource:
     """Return the dataset as resource: Dataset -> Unit -> Organization."""
     organization = Resource(VPEntityType.ORGANIZATION, organization_sgid)

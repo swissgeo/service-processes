@@ -1,4 +1,3 @@
-import uuid
 from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, BeforeValidator, Field
@@ -6,10 +5,10 @@ from pydantic import BaseModel, BeforeValidator, Field
 from app.models import process as models
 from app.schemas.pagination import PaginatedResponse, PaginationParams
 
-sgid = Annotated[
-    uuid.UUID,
-    Field(description="ID of a process"),
-]
+SGID_MAX_LENGTH = 128
+
+# SGIDs are arbitrary strings (not necessarily UUIDs), limited to the length of the DB columns.
+SgidStr = Annotated[str, Field(min_length=1, max_length=SGID_MAX_LENGTH)]
 
 # Max 30 datasets in query as this is the limit of a batch request to AWS Verified permissions.
 MAX_DATASETS = 30
@@ -26,7 +25,7 @@ class ListProcessesParams(PaginationParams):
     """Query parameters of the list processes endpoint."""
 
     datasets: Annotated[
-        list[uuid.UUID],
+        list[SgidStr],
         Field(
             description=f"Comma separated IDs of the datasets (1 to {MAX_DATASETS})",
             min_length=1,
@@ -37,7 +36,7 @@ class ListProcessesParams(PaginationParams):
 
 
 class Process(BaseModel):
-    sgid: uuid.UUID = Field(description="Identifier of the process")
+    sgid: SgidStr = Field(description="Identifier of the process")
     name: str = Field(description="Name of the process", examples=["Export dataset"])
     description: str = Field(description="Description of what the process does")
     inputs: dict[str, Any] = Field(

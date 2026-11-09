@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any
@@ -30,13 +29,16 @@ class Process(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Returned in api responses
-    sgid: Mapped[uuid.UUID] = mapped_column(unique=True, server_default=text("uuidv7()"))
+    # Returned in api responses. Any string up to 128 characters, defaults to a TypeID with the
+    # prefix "prc" (e.g. prc_01h455vb4pex5vsknk084sn02q) if not set.
+    sgid: Mapped[str] = mapped_column(
+        String(128), unique=True, server_default=text("typeid_generate('prc')")
+    )
     # Organization, unit and dataset live outside this
     # service and will be used for authorization checks.
-    organization_sgid: Mapped[uuid.UUID]
-    organization_unit_sgid: Mapped[uuid.UUID]
-    dataset_sgid: Mapped[uuid.UUID] = mapped_column(index=True)  # used for lookups
+    organization_sgid: Mapped[str] = mapped_column(String(128))
+    organization_unit_sgid: Mapped[str] = mapped_column(String(128))
+    dataset_sgid: Mapped[str] = mapped_column(String(128), index=True)  # used for lookups
 
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(Text)
