@@ -18,17 +18,17 @@ from app.core.authorization import (
 from app.core.process_service import ProcessService, get_process_service
 from app.models.process import Process
 from app.schemas.pagination import DEFAULT_LIMIT, MAX_LIMIT
-from app.schemas.process import MAX_DATASETS
+from app.schemas.process import MAX_DATASETS, SGID_MAX_LENGTH
 
 TOKEN = "header.payload.signature"  # noqa: S105
 AUTH_HEADERS = {"X-Auth-Request-Access-Token": TOKEN}
 
-DATASET = uuid.UUID("0195f3a2-7c1e-7b3a-9d4e-000000000001")
+DATASET = "0195f3a2-7c1e-7b3a-9d4e-000000000001"
 
 PROCESS = Process(
-    sgid=uuid.UUID("0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e"),
-    organization_sgid=uuid.uuid7(),
-    organization_unit_sgid=uuid.uuid7(),
+    sgid="0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e",
+    organization_sgid=str(uuid.uuid7()),
+    organization_unit_sgid=str(uuid.uuid7()),
     dataset_sgid=DATASET,
     name="Dummy export",
     description="Dummy process",
@@ -144,7 +144,7 @@ def test_list_processes_pagination(
 def test_list_processes_multiple_datasets(
     client: TestClient, process_service: AsyncMock, query: str
 ):
-    a, b = uuid.uuid7(), uuid.uuid7()
+    a, b = str(uuid.uuid7()), "dataset_b-2"
 
     response = client.get("/processes" + query.format(a=a, b=b), headers=AUTH_HEADERS)
 
@@ -159,8 +159,9 @@ def test_list_processes_multiple_datasets(
         "",
         "?datasets=",
         "?datasets=,",
-        "?datasets=not-a-uuid",
         "?datasets=" + ",".join([str(DATASET)] * (MAX_DATASETS + 1)),
+        "?datasets=" + "a" * (SGID_MAX_LENGTH + 1),
+        f"?datasets={DATASET}," + "a" * (SGID_MAX_LENGTH + 1),
     ],
 )
 @pytest.mark.usefixtures("authorizer")
@@ -173,10 +174,22 @@ def test_list_processes_invalid_datasets(
     process_service.list_processes.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("authorizer")
+def test_list_processes_accepts_non_uuid_dataset_of_max_length(
+    client: TestClient, process_service: AsyncMock
+):
+    dataset = "a" * SGID_MAX_LENGTH
+
+    response = client.get(f"/processes?datasets={dataset}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    process_service.list_processes.assert_awaited_once_with([dataset], DEFAULT_LIMIT, 0)
+
+
 def test_list_processes_only_of_allowed_datasets(
     client: TestClient, process_service: AsyncMock, authorizer: AsyncMock
 ):
-    allowed, denied = uuid.uuid7(), uuid.uuid7()
+    allowed, denied = str(uuid.uuid7()), str(uuid.uuid7())
     authorizer.batch_is_authorized.side_effect = lambda _token, _action, resources: [
         resource for resource in resources if resource.id == allowed
     ]
@@ -306,6 +319,35 @@ def test_get_process_missing_token(
     authorizer.is_authorized.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("authorizer")
+def test_get_process_with_non_uuid_sgid(client: TestClient, process_service: AsyncMock):
+    sgid = ("my.process_ID-1:" + "x" * SGID_MAX_LENGTH)[:SGID_MAX_LENGTH]
+    assert len(sgid) == SGID_MAX_LENGTH
+    process_service.get_process.return_value = Process(
+        sgid=sgid,
+        organization_sgid="org",
+        organization_unit_sgid="unit",
+        dataset_sgid="dataset",
+        name="Dummy export",
+        description="Dummy process",
+        user_parameter_schema={},
+    )
+
+    response = client.get(f"/processes/{sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json()["sgid"] == sgid
+    process_service.get_process.assert_awaited_once_with(sgid)
+
+
+@pytest.mark.usefixtures("authorizer")
+def test_get_process_sgid_too_long(client: TestClient, process_service: AsyncMock):
+    response = client.get(f"/processes/{'a' * (SGID_MAX_LENGTH + 1)}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 400
+    process_service.get_process.assert_not_awaited()
+
+
 def test_get_process_not_found(
     client: TestClient, process_service: AsyncMock, authorizer: AsyncMock
 ):
@@ -316,11 +358,3 @@ def test_get_process_not_found(
     assert response.status_code == 404
     assert response.json() == {"error": "Not Found", "message": "Process not found"}
     authorizer.is_authorized.assert_not_awaited()
-
-
-@pytest.mark.usefixtures("authorizer")
-def test_get_process_invalid_sgid(client: TestClient, process_service: AsyncMock):
-    response = client.get("/processes/not-a-uuid", headers=AUTH_HEADERS)
-
-    assert response.status_code == 400
-    process_service.get_process.assert_not_awaited()

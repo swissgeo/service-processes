@@ -26,11 +26,11 @@ from app.settings import Settings
 
 TOKEN = "header.payload.signature"  # noqa: S105
 
-ORGANIZATION = uuid.uuid7()
-ORGANIZATION_UNIT = uuid.uuid7()
-DATASET = uuid.uuid7()
+ORGANIZATION = str(uuid.uuid7())
+ORGANIZATION_UNIT = str(uuid.uuid7())
+DATASET = str(uuid.uuid7())
 PROCESS = Process(
-    sgid=uuid.uuid7(),
+    sgid=str(uuid.uuid7()),
     organization_sgid=ORGANIZATION,
     organization_unit_sgid=ORGANIZATION_UNIT,
     dataset_sgid=DATASET,
@@ -54,8 +54,8 @@ def decision(value: str, errors: list | None = None) -> dict:
     return {"decision": value, "determiningPolicies": [], "errors": errors or []}
 
 
-def entity(entity_type: str, entity_id: uuid.UUID) -> dict:
-    return {"entityType": f"Test::{entity_type}", "entityId": str(entity_id)}
+def entity(entity_type: str, entity_id: str) -> dict:
+    return {"entityType": f"Test::{entity_type}", "entityId": entity_id}
 
 
 def batch_request(resource: Resource) -> dict:
@@ -152,7 +152,7 @@ async def test_batch_is_authorized_sends_requests_and_deduplicated_entities(
 ):
     # Both processes belong to the same dataset, so the ancestors must only be sent once
     other_process = Process(
-        sgid=uuid.uuid7(),
+        sgid=str(uuid.uuid7()),
         organization_sgid=ORGANIZATION,
         organization_unit_sgid=ORGANIZATION_UNIT,
         dataset_sgid=DATASET,
@@ -204,7 +204,7 @@ async def test_batch_is_authorized_sends_requests_and_deduplicated_entities(
 async def test_batch_is_authorized_denies_allow_with_errors(
     stubber: Stubber, authorizer: VerifiedPermissionsAuthorizer
 ):
-    erroring, allowed = (Resource(VPEntityType.PROCESS, uuid.uuid7()) for _ in range(2))
+    erroring, allowed = (Resource(VPEntityType.PROCESS, str(uuid.uuid7())) for _ in range(2))
     stubber.add_response(
         "batch_is_authorized_with_token",
         {
@@ -231,7 +231,7 @@ async def test_batch_is_authorized_without_resources_does_not_call_client(
 async def test_batch_is_authorized_splits_into_chunks(
     stubber: Stubber, authorizer: VerifiedPermissionsAuthorizer
 ):
-    resources = [Resource(VPEntityType.PROCESS, uuid.uuid7()) for _ in range(31)]
+    resources = [Resource(VPEntityType.PROCESS, str(uuid.uuid7())) for _ in range(31)]
     for chunk in (resources[:30], resources[30:]):
         stubber.add_response(
             "batch_is_authorized_with_token",
@@ -278,7 +278,7 @@ async def test_require_rejects(result: dict, expected_status: int):
 
     with pytest.raises(HTTPException) as exc_info:
         await Authorization(authorizer, TOKEN).require(
-            Action.GET_PROCESS, Resource(VPEntityType.PROCESS, uuid.uuid7())
+            Action.GET_PROCESS, Resource(VPEntityType.PROCESS, str(uuid.uuid7()))
         )
 
     assert exc_info.value.status_code == expected_status
@@ -289,7 +289,7 @@ async def test_require_rejects(result: dict, expected_status: int):
 async def test_require_allows():
     authorizer = AsyncMock()
     authorizer.is_authorized.return_value = True
-    resource = Resource(VPEntityType.PROCESS, uuid.uuid7())
+    resource = Resource(VPEntityType.PROCESS, str(uuid.uuid7()))
 
     await Authorization(authorizer, TOKEN).require(Action.GET_PROCESS, resource)
 
@@ -298,7 +298,7 @@ async def test_require_allows():
 
 @pytest.mark.asyncio
 async def test_filter_returns_allowed_resources():
-    resources = [Resource(VPEntityType.PROCESS, uuid.uuid7()) for _ in range(2)]
+    resources = [Resource(VPEntityType.PROCESS, str(uuid.uuid7())) for _ in range(2)]
     authorizer = AsyncMock()
     authorizer.batch_is_authorized.return_value = resources[:1]
 
@@ -315,7 +315,7 @@ async def test_filter_rejects_when_authorization_unavailable():
 
     with pytest.raises(HTTPException) as exc_info:
         await Authorization(authorizer, TOKEN).filter(
-            Action.GET_PROCESS, [Resource(VPEntityType.PROCESS, uuid.uuid7())]
+            Action.GET_PROCESS, [Resource(VPEntityType.PROCESS, str(uuid.uuid7()))]
         )
 
     assert exc_info.value.status_code == 503

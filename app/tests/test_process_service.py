@@ -10,7 +10,7 @@ import pytest
 from app.core.process_service import ProcessService, get_process_service
 from app.models.process import Process
 
-DATASET = uuid.UUID("0195f3a2-7c1e-7b3a-9d4e-000000000001")
+DATASET = "0195f3a2-7c1e-7b3a-9d4e-000000000001"
 
 
 def _mock_session(processes: list[Process], total: int | None) -> AsyncMock:
@@ -51,7 +51,7 @@ async def test_list_processes_orders_and_paginates_query():
 
 @pytest.mark.asyncio
 async def test_list_processes_filters_by_datasets():
-    other = uuid.UUID("0195f3a2-7c1e-7b3a-9d4e-000000000002")
+    other = "0195f3a2-7c1e-7b3a-9d4e-000000000002"
     session = _mock_session([], total=0)
 
     await ProcessService(session).list_processes(dataset_sgids=[DATASET, other], limit=20, offset=0)
@@ -89,7 +89,7 @@ async def test_list_processes_total_defaults_to_zero():
 
 @pytest.mark.asyncio
 async def test_get_process_queries_by_sgid():
-    sgid = uuid.UUID("0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e")
+    sgid = "0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e"
     session = AsyncMock(spec=AsyncSession)
 
     await ProcessService(session).get_process(sgid)
@@ -104,7 +104,7 @@ async def test_get_process_returns_process():
     session = AsyncMock(spec=AsyncSession)
     session.scalar.return_value = process
 
-    result = await ProcessService(session).get_process(uuid.uuid7())
+    result = await ProcessService(session).get_process(str(uuid.uuid7()))
 
     assert result is process
 
@@ -114,7 +114,7 @@ async def test_get_process_returns_none_when_not_found():
     session = AsyncMock(spec=AsyncSession)
     session.scalar.return_value = None
 
-    result = await ProcessService(session).get_process(uuid.uuid7())
+    result = await ProcessService(session).get_process(str(uuid.uuid7()))
 
     assert result is None
 
@@ -136,7 +136,7 @@ async def test_get_datasets_queries_distinct_hierarchy_of_datasets():
 
 @pytest.mark.asyncio
 async def test_get_datasets_returns_tuples():
-    rows = [(DATASET, uuid.uuid7(), uuid.uuid7())]
+    rows = [(DATASET, str(uuid.uuid7()), str(uuid.uuid7()))]
     session = AsyncMock(spec=AsyncSession)
     session.execute.return_value = MagicMock(
         tuples=MagicMock(return_value=MagicMock(all=MagicMock(return_value=rows)))

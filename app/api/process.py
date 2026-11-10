@@ -9,7 +9,7 @@ from app.schemas.process import (
     ListProcessesResponse,
     Process,
     ProcessResponse,
-    sgid,
+    SgidStr,
 )
 
 PROCESS_TAG = "Process"
@@ -41,7 +41,9 @@ async def list_processes(
 
 @router.get("/processes/{sgid}", summary="Get process")
 async def get_process(
-    sgid: sgid, service: ProcessServiceDep, authorization: AuthorizationDep
+    sgid: SgidStr,
+    service: ProcessServiceDep,
+    authorization: AuthorizationDep,
 ) -> ProcessResponse:
     """Get a process by sgid"""
     process = await service.get_process(sgid)
