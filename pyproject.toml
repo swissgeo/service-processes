@@ -13,6 +13,7 @@ dependencies = [
     "boto3~=1.40",
     "fastapi[standard]~=0.141",
     "httptools~=0.8",
+    "jsonschema~=4.26",
     "opentelemetry-exporter-otlp~=1.44",
     "opentelemetry-instrumentation-botocore~=0.65b0",
     "opentelemetry-instrumentation-fastapi~=0.65b0",

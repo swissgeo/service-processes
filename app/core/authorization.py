@@ -22,6 +22,7 @@ class Action(StrEnum):
 
     GET_PROCESS = "getProcess"
     LIST_PROCESSES = "listProcesses"
+    EXECUTE_PROCESS = "executeProcess"
 
 
 class VPEntityType(StrEnum):

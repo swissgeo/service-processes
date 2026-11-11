@@ -43,6 +43,13 @@ class Settings(BaseSettings):
             database=self.db_name,
         ).render_as_string(hide_password=False)
 
+    # Airflow host
+    airflow_host: str
+    # Airflow token ttl
+    airflow_token_ttl: int = 3600  # Airflow default token duration is 1 hour
+    # Timeout for requests to airflow
+    airflow_client_timeout: float = 10
+
     # AWS Verified Permissions settings
     avp_policy_store_id: str
     # Cedar namespace of the entity and action types in the policy store schema

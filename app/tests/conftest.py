@@ -22,6 +22,8 @@ def required_avp_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
+    # Required as well, no requests are sent to it on startup
+    monkeypatch.setenv("AIRFLOW_HOST", "http://airflow.test")
 
 
 @pytest.fixture
