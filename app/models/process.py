@@ -65,6 +65,9 @@ class Process(Base):
 class JobStatus(StrEnum):
     """Status of a job, stored as string."""
 
+    # TODO: This might change once the get Job endpoints are implemented and we align with the
+    # airflow status options.
+
     # Job inserted, DAG run not (yet) triggered successfully in Airflow
     SUBMITTING = "submitting"
     # DAG run triggered in Airflow

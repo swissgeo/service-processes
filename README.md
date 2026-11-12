@@ -99,6 +99,19 @@ This creates a file such as `migrations/versions/2026_10_15_1511-ee7947955462_ad
 Autogenerate does not detect everything (e.g. table or column renames, some type changes), so
 always review the generated script before applying it with `make db-upgrade`.
 
+#### Local sample data
+
+`docker/seed-local-data.sql` contains sample processes for local development, e.g. one that
+triggers the dummy DAG of the [local Airflow](#airflow-during-local-development). Load it after
+the migrations:
+
+```bash
+make db-seed
+```
+
+The script is idempotent: re-running it updates existing rows to the values in the file. Add new
+sample data there instead of inserting it manually.
+
 Other useful targets:
 
 ```bash
@@ -195,6 +208,32 @@ replaced by a dummy authorizer allowing all requests. The dummy is not part of t
 All docs related paths (`openapi.json`, `docs`, `redoc` and their `internal/` variants) can be
 prefixed with the `DOC_PREFIX_PATH` setting, e.g. `DOC_PREFIX_PATH=/specs` serves Swagger under
 `/specs/docs`.
+
+### Airflow during local development
+
+Starting a process triggers a DAG run in Airflow. For local development, a single container
+Airflow (`airflow standalone`, SQLite) is part of `docker-compose.yml`. It is not started by
+`make docker-compose-up`, as it is heavy and takes about a minute to start:
+
+```bash
+make start-airflow   # waits until Airflow is healthy
+make stop-airflow
+```
+
+The Airflow UI is at http://localhost:8081 (user `service`, password `local`, set in the `command`
+of the `airflow` service). DAGs are loaded from `docker/airflow/dags/`. It contains a dummy
+DAG for the process in `app/models/insert.sql`, which only logs the `conf` it was triggered with.
+Add a DAG with the `dag_id` of every other process you want to start locally.
+
+In the cluster, the service gets its Airflow token by exchanging its Kubernetes service account
+token. Locally, it logs in with username and password instead, configured in `.env.default`:
+
+```bash
+AIRFLOW_HOST=http://localhost:8081
+USE_LOCAL_AIRFLOW=true
+AIRFLOW_LOCAL_USERNAME=service
+AIRFLOW_LOCAL_PASSWORD=local
+```
 
 ## Observability
 

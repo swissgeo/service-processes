@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from typing import Annotated, Any
 
 import httpx
@@ -23,6 +24,21 @@ def _read_k8s_token() -> str:
         return f.read().strip()
 
 
+# Returns the request arguments for POST /auth/token. Only how the Airflow token is obtained
+# differs between environments, caching, retrying and the API calls are the same.
+TokenRequest = Callable[[], dict[str, Any]]
+
+
+def k8s_token_request() -> dict[str, Any]:
+    """Exchange the Kubernetes service account token for an Airflow token (in the cluster)."""
+    return {"headers": {"Authorization": f"Bearer {_read_k8s_token()}"}}
+
+
+def password_token_request(username: str, password: str) -> TokenRequest:
+    """Log in with username and password (simple auth manager of the local Airflow)."""
+    return lambda: {"json": {"username": username, "password": password}}
+
+
 class AirflowClient:
     """Airflow client"""
 
@@ -31,8 +47,10 @@ class AirflowClient:
         host: str,
         airflow_token_ttl: int,
         airflow_client_timeout: float,
+        token_request: TokenRequest = k8s_token_request,
         transport: httpx.AsyncBaseTransport | None = None,  # e.g. httpx.MockTransport in tests
     ) -> None:
+        self._token_request = token_request
         self._airflow_token_ttl = airflow_token_ttl
         self._http = httpx.AsyncClient(
             base_url=host, timeout=airflow_client_timeout, transport=transport
@@ -44,9 +62,7 @@ class AirflowClient:
     async def _auth_headers(self) -> dict[str, str]:
         async with self._lock:
             if self._token is None or time.monotonic() >= self._token_expires_at:
-                response = await self._http.post(
-                    "/auth/token", headers={"Authorization": f"Bearer {_read_k8s_token()}"}
-                )
+                response = await self._http.post("/auth/token", **self._token_request())
                 response.raise_for_status()
                 self._token = AirflowAccessTokenResponse(**response.json()).access_token
                 self._token_expires_at = time.monotonic() + self._airflow_token_ttl - 60
@@ -87,8 +103,21 @@ class AirflowClient:
 
 
 def initialize_airflow_client(app: FastAPI, settings: Settings) -> None:
+    token_request = k8s_token_request
+    if settings.use_local_airflow:
+        if not settings.airflow_local_username or not settings.airflow_local_password:
+            raise RuntimeError(
+                "USE_LOCAL_AIRFLOW requires AIRFLOW_LOCAL_USERNAME and AIRFLOW_LOCAL_PASSWORD"
+            )
+        logger.warning("Using local Airflow with username/password login")
+        token_request = password_token_request(
+            settings.airflow_local_username, settings.airflow_local_password.get_secret_value()
+        )
     app.state.airflow_client = AirflowClient(
-        settings.airflow_host, settings.airflow_token_ttl, settings.airflow_client_timeout
+        settings.airflow_host,
+        settings.airflow_token_ttl,
+        settings.airflow_client_timeout,
+        token_request=token_request,
     )
 
 

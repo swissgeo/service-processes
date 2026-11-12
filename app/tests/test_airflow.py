@@ -1,13 +1,22 @@
 import json
 from collections.abc import AsyncGenerator, Callable
+from typing import Any
 
 import httpx
 import pytest_asyncio
 
+from fastapi import FastAPI
+
 import pytest
 
 from app.core import airflow
-from app.core.airflow import AirflowClient
+from app.core.airflow import (
+    AirflowClient,
+    initialize_airflow_client,
+    k8s_token_request,
+    password_token_request,
+)
+from app.settings import Settings
 
 HOST = "http://airflow.test"
 TOKEN_TTL = 3600
@@ -190,3 +199,69 @@ async def test_token_request_failure_raises():
         await client.aclose()
 
     assert error.value.response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_password_token_request():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/auth/token":
+            return httpx.Response(201, json={"access_token": "local-jwt"})
+        return httpx.Response(200, json={})
+
+    client = AirflowClient(
+        HOST,
+        TOKEN_TTL,
+        10,
+        token_request=password_token_request("service", "secret"),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        await _trigger(client)()
+    finally:
+        await client.aclose()
+
+    token_request, api_request = requests
+    assert json.loads(token_request.content) == {"username": "service", "password": "secret"}
+    assert "Authorization" not in token_request.headers
+    assert api_request.headers["Authorization"] == "Bearer local-jwt"
+
+
+def _settings(**overrides: Any) -> Settings:
+    return Settings(_env_file=None, **overrides)
+
+
+@pytest.mark.asyncio
+async def test_initialize_uses_k8s_token_by_default():
+    app = FastAPI()
+
+    initialize_airflow_client(app, _settings())
+
+    assert app.state.airflow_client._token_request is k8s_token_request  # noqa: SLF001
+    await app.state.airflow_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_initialize_local_airflow_uses_password_login():
+    app = FastAPI()
+
+    initialize_airflow_client(
+        app,
+        _settings(
+            use_local_airflow=True,
+            airflow_local_username="service",
+            airflow_local_password="pw",  # noqa: S106
+        ),
+    )
+
+    assert app.state.airflow_client._token_request() == {  # noqa: SLF001
+        "json": {"username": "service", "password": "pw"}
+    }
+    await app.state.airflow_client.aclose()
+
+
+def test_initialize_local_airflow_requires_credentials():
+    with pytest.raises(RuntimeError, match="AIRFLOW_LOCAL_USERNAME"):
+        initialize_airflow_client(FastAPI(), _settings(use_local_airflow=True))

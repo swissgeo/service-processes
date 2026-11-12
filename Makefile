@@ -103,6 +103,12 @@ db-upgrade: ## Apply all pending migrations
 	$(ALEMBIC) upgrade head
 
 
+.PHONY: db-seed
+db-seed: ## Insert or update the local sample data (docker/seed-local-data.sql), after db-upgrade
+	docker compose exec -T db psql --set=ON_ERROR_STOP=1 --username=$(DB_USER) --dbname=$(DB_NAME) \
+		< docker/seed-local-data.sql
+
+
 .PHONY: db-downgrade
 db-downgrade: ## Revert the last migration
 	$(ALEMBIC) downgrade -1
@@ -191,6 +197,16 @@ stop-otel: ## Stop the otel collector and jaeger trace analyzer
 	docker compose down jaeger
 	docker compose down prometheus
 	docker compose down otel-collector
+
+
+.PHONY: start-airflow
+start-airflow: docker-network ## Run a local Airflow (http://localhost:8081, user service/local)
+	docker compose --profile airflow up -d --wait airflow
+
+
+.PHONY: stop-airflow
+stop-airflow: ## Stop the local Airflow
+	docker compose --profile airflow down airflow
 
 
 .PHONY: docker-compose-up

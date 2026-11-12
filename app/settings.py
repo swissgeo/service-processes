@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     airflow_token_ttl: int = 3600  # Airflow default token duration is 1 hour
     # Timeout for requests to airflow
     airflow_client_timeout: float = 10
+    # Only set for local development: log in to the local Airflow (docker-compose.yml) with
+    # username and password instead of exchanging the Kubernetes service account token
+    use_local_airflow: bool = False
+    airflow_local_username: str | None = None
+    airflow_local_password: SecretStr | None = None
 
     # AWS Verified Permissions settings
     avp_policy_store_id: str

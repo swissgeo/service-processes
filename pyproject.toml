@@ -8,11 +8,11 @@ dynamic = ["version"]
 # Dependencies
 dependencies = [
     "alembic~=1.20",
-    "apache-airflow-client~=3.3",
     "asyncpg~=0.31",
     "boto3~=1.40",
     "fastapi[standard]~=0.141",
     "httptools~=0.8",
+    "httpx~=0.28",
     "jsonschema~=4.26",
     "opentelemetry-exporter-otlp~=1.44",
     "opentelemetry-instrumentation-botocore~=0.65b0",
@@ -103,6 +103,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [tool.ruff.lint.per-file-ignores]
 
 "migrations/**" = ["INP001"] # Ignore missing __init__.py files
+"docker/**" = ["INP001"] # Ignore missing __init__.py files
 
 "app/tests/**" = [
     "S101",    # Ignore usage of assert statements in tests
@@ -134,6 +135,14 @@ fastapi = ["fastapi", "pydantic"]
 
 [tool.ty.src]
 exclude = []
+
+# The local Airflow DAGs run in the Airflow container (docker-compose.yml), airflow is not a
+# dependency of the service
+[[tool.ty.overrides]]
+include = ["docker/airflow/dags/**"]
+
+[tool.ty.overrides.rules]
+import-not-found = "ignore"
 
 #===============================================================================
 # Pytest configuration
