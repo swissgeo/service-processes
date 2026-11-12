@@ -142,6 +142,9 @@ def _build_dag_conf(
 
 
 def _set_path(target: dict[str, Any], keys: list[str], value: Any) -> None:
+    """Sets the value under the path keys in the target. If a value already
+    exists in the target, an error is raised.
+    """
     *parents, last = keys
     for key in parents:
         target = target.setdefault(key, {})

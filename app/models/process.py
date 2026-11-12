@@ -19,8 +19,12 @@ class Process(Base):
 
     __tablename__ = "process"
     __table_args__ = (UniqueConstraint("organization_sgid", "name"),)
-    # Fetch server-generated values (sgid, timestamps) via RETURNING on INSERT and UPDATE, so
-    # accessing them afterwards doesn't trigger a lazy load (not allowed with asyncio).
+    # When you access a database-generated field like sgid or timestamps that is not yet loaded in
+    # the Python object, SQLAlchemy fires an extra hidden query to fetch its value ("lazy load").
+    # With async SQLAlchemy that hidden query would crash, so we configure SQLAlchemy to fetch the
+    # database-generated values immediately as part of the INSERT/UPDATE itself (using Postgres'
+    # RETURNING clause). MappingProxyType makes this config dict read-only, so it can't be edited by
+    # accident.
     __mapper_args__ = MappingProxyType({"eager_defaults": True})
 
     # only used as primary key
@@ -80,8 +84,12 @@ class Job(Base):
     """A process run instance, backed by an airflow dag run."""
 
     __tablename__ = "job"
-    # Fetch server-generated values (sgid, timestamps) via RETURNING on INSERT and UPDATE, so
-    # accessing them afterwards doesn't trigger a lazy load (not allowed with asyncio).
+    # When you access a database-generated field like sgid or timestamps that is not yet loaded in
+    # the Python object, SQLAlchemy fires an extra hidden query to fetch its value ("lazy load").
+    # With async SQLAlchemy that hidden query would crash, so we configure SQLAlchemy to fetch the
+    # database-generated values immediately as part of the INSERT/UPDATE itself (using Postgres'
+    # RETURNING clause). MappingProxyType makes this config dict read-only, so it can't be edited by
+    # accident.
     __mapper_args__ = MappingProxyType({"eager_defaults": True})
 
     # only used as primary key

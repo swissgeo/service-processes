@@ -318,3 +318,29 @@ async def test_execute_process_input_without_mapping():
 
     session.add.assert_not_called()
     airflow.trigger_dag_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "error", "match"),
+    [
+        ("options.crs", ValueError, "options.crs is already set by internal_config"),
+        ("options", ValueError, "options is already set by internal_config"),
+        ("output_format.x", TypeError, "output_format is not an object"),
+    ],
+)
+async def test_execute_process_input_cannot_overwrite_internal_config(
+    path: str, error: type[Exception], match: str
+):
+    # Misconfigured process: mapping targets a path already set by internal_config
+    process = _process()
+    process.parameter_mapping = {"startDate": path}
+    session = _session()
+    airflow = AsyncMock(spec=AirflowClient)
+
+    with pytest.raises(error, match=match):
+        await ProcessService(session, airflow).execute_process(process, {"startDate": "2026-01-01"})
+
+    session.add.assert_not_called()
+    airflow.trigger_dag_run.assert_not_awaited()
+    assert process.internal_config == {"output_format": "geojson", "options": {"crs": 2056}}
