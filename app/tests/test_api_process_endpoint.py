@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
@@ -24,6 +25,7 @@ TOKEN = "header.payload.signature"  # noqa: S105
 AUTH_HEADERS = {"X-Auth-Request-Access-Token": TOKEN}
 
 DATASET = "0195f3a2-7c1e-7b3a-9d4e-000000000001"
+CREATED_AT = datetime(2026, 1, 1, 10, 0, 0, tzinfo=UTC)
 
 # Published schema of PROCESS: unknown inputs are always forbidden, see Process.input_schema
 PUBLISHED_INPUTS = {
@@ -369,7 +371,9 @@ def test_get_process_not_found(
 
 def test_execute_process(client: TestClient, process_service: AsyncMock, authorizer: AsyncMock):
     process_service.get_process.return_value = PROCESS
-    process_service.execute_process.return_value = Job(sgid="pjb_123", status="queued")
+    process_service.execute_process.return_value = Job(
+        sgid="pjb_123", status="queued", created_at=CREATED_AT
+    )
 
     response = client.post(
         f"/processes/{PROCESS.sgid}/execute",
@@ -378,7 +382,13 @@ def test_execute_process(client: TestClient, process_service: AsyncMock, authori
     )
 
     assert response.status_code == 200
-    assert response.json() == {"sgid": "pjb_123", "status": "queued"}
+    assert response.json() == {
+        "sgid": "pjb_123",
+        "status": "queued",
+        "created_at": "2026-01-01T10:00:00Z",
+        "started_at": None,
+        "finished_at": None,
+    }
     authorizer.is_authorized.assert_awaited_once_with(
         TOKEN, Action.EXECUTE_PROCESS, process_resource(PROCESS)
     )
@@ -431,3 +441,70 @@ def test_execute_process_invalid_inputs(client: TestClient, process_service: Asy
         "message": "Invalid request payload",
         "detail": errors,
     }
+
+
+JOB = Job(sgid="pjb_123", dag_run_id="run-1", status="running", process=PROCESS)
+
+
+def test_get_job(client: TestClient, process_service: AsyncMock, authorizer: AsyncMock):
+    process_service.get_job.return_value = JOB
+    process_service.get_updated_job.return_value = Job(
+        sgid="pjb_123",
+        status="success",
+        created_at=CREATED_AT,
+        started_at=CREATED_AT + timedelta(seconds=5),
+        finished_at=CREATED_AT + timedelta(minutes=1),
+    )
+
+    response = client.get(f"/jobs/{JOB.sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "sgid": "pjb_123",
+        "status": "success",
+        "created_at": "2026-01-01T10:00:00Z",
+        "started_at": "2026-01-01T10:00:05Z",
+        "finished_at": "2026-01-01T10:01:00Z",
+    }
+    process_service.get_job.assert_awaited_once_with(JOB.sgid)
+    authorizer.is_authorized.assert_awaited_once_with(
+        TOKEN, Action.GET_PROCESS, process_resource(PROCESS)
+    )
+    process_service.get_updated_job.assert_awaited_once_with(JOB)
+
+
+def test_get_job_forbidden(client: TestClient, process_service: AsyncMock, authorizer: AsyncMock):
+    process_service.get_job.return_value = JOB
+    authorizer.is_authorized.return_value = False
+
+    response = client.get(f"/jobs/{JOB.sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 403
+    # Unauthorized users must not trigger calls to Airflow
+    process_service.get_updated_job.assert_not_awaited()
+
+
+def test_get_job_not_found(client: TestClient, process_service: AsyncMock, authorizer: AsyncMock):
+    process_service.get_job.return_value = None
+
+    response = client.get(f"/jobs/{JOB.sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "Not Found", "message": "Job not found"}
+    authorizer.is_authorized.assert_not_awaited()
+    process_service.get_updated_job.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("authorizer")
+def test_get_job_sgid_too_long(client: TestClient, process_service: AsyncMock):
+    response = client.get(f"/jobs/{'a' * (SGID_MAX_LENGTH + 1)}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 400
+    process_service.get_job.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("process_service", "authorizer")
+def test_get_job_without_token(client: TestClient):
+    response = client.get(f"/jobs/{JOB.sgid}")
+
+    assert response.status_code == 401

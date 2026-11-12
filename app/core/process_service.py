@@ -1,4 +1,5 @@
 import copy
+import logging
 import uuid
 from collections.abc import Sequence
 from typing import Annotated, Any
@@ -6,12 +7,15 @@ from typing import Annotated, Any
 from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from fastapi import Depends
 
-from app.core.airflow import AirflowClient, AirflowDep
+from app.core.airflow import AirflowClient, AirflowDep, AirflowError
 from app.core.database import DatabaseSessionDep
 from app.models.process import Job, JobStatus, Process
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessService:
@@ -82,11 +86,40 @@ class ProcessService:
             await self.airflow.trigger_dag_run(process.dag_id, job.dag_run_id, conf)
         except Exception:
             async with self.session.begin():
-                job.status = JobStatus.FAILED
+                job.status = JobStatus.FAILED_SUBMIT
             raise
 
         async with self.session.begin():
             job.status = JobStatus.QUEUED
+        return job
+
+    async def get_job(self, sgid: str) -> Job | None:
+        """Return the job with the given sgid, or None if it doesn't exist."""
+        async with self.session.begin():
+            return await self.session.scalar(
+                select(Job).options(joinedload(Job.process)).where(Job.sgid == sgid)
+            )
+
+    async def get_updated_job(self, job: Job) -> Job:
+        """Return the job after getting the latest information from the airflow dag run.
+        Only get the dag run information if the job state shows there might be a change.
+        """
+        if job.status in (
+            JobStatus.SUBMITTING,  # internal state -> dag run does not (yet) exist in airflow
+            JobStatus.FAILED_SUBMIT,  # internal state -> dag run does not exist in airflow
+            JobStatus.SUCCESS,  # dag run finished, no updates to get
+            JobStatus.FAILED,  # dag run finished, no updates to get
+        ):
+            return job
+        try:
+            dag_run_details = await self.airflow.get_dag_run(job.process.dag_id, job.dag_run_id)
+        except AirflowError:
+            logger.warning("Could not refresh job %s from Airflow", job.sgid, exc_info=True)
+            return job
+        async with self.session.begin():
+            job.status = dag_run_details.state
+            job.started_at = dag_run_details.start_date
+            job.finished_at = dag_run_details.end_date
         return job
 
 

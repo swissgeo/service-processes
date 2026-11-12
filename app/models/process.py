@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
@@ -69,15 +69,15 @@ class Process(Base):
 class JobStatus(StrEnum):
     """Status of a job, stored as string."""
 
-    # TODO: This might change once the get Job endpoints are implemented and we align with the
-    # airflow status options.
+    # service-processes internal status options
+    SUBMITTING = "submitting"  # Job inserted, DAG run not (yet) triggered in Airflow
+    FAILED_SUBMIT = "failed_submit"  # Triggering the DAG run failed
 
-    # Job inserted, DAG run not (yet) triggered successfully in Airflow
-    SUBMITTING = "submitting"
-    # DAG run triggered in Airflow
-    QUEUED = "queued"
-    # Triggering the DAG run failed
-    FAILED = "failed"
+    # Airflow Dag run status options
+    QUEUED = "queued"  # DAG run triggered
+    RUNNING = "running"  # DAG running
+    SUCCESS = "success"  # DAG run completed successfully
+    FAILED = "failed"  # DAG run failed
 
 
 class Job(Base):
@@ -104,7 +104,11 @@ class Job(Base):
         String(128), unique=True, server_default=text("typeid_generate('pjb')")
     )
     process_id: Mapped[int] = mapped_column(ForeignKey("process.id"), index=True)
+    # lazy="raise": async sessions can't lazy-load, so fail loudly if a query forgot to load it
+    process: Mapped[Process] = relationship(lazy="raise")
 
     # Chosen by us when triggering the DAG run, so a job can always be matched to its run
     dag_run_id: Mapped[str] = mapped_column(String(250), unique=True)
     status: Mapped[str] = mapped_column(String(128))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
