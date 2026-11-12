@@ -2,10 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-<<<<<<< HEAD
 from datetime import datetime
-=======
->>>>>>> 9e5f173 (GPS-1011: Local airflow)
 from typing import Annotated, Any
 
 import httpx
@@ -50,13 +47,10 @@ def password_token_request(username: str, password: str) -> TokenRequest:
     return lambda: {"json": {"username": username, "password": password}}
 
 
-<<<<<<< HEAD
 class AirflowError(Exception):
     """A request to Airflow failed or returned an unexpected response."""
 
 
-=======
->>>>>>> 9e5f173 (GPS-1011: Local airflow)
 class AirflowClient:
     """Airflow client"""
 

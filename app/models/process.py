@@ -3,7 +3,18 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    desc,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -69,7 +80,6 @@ class Process(Base):
 class JobStatus(StrEnum):
     """Status of a job, stored as string."""
 
-<<<<<<< HEAD
     # service-processes internal status options
     SUBMITTING = "submitting"  # Job inserted, DAG run not (yet) triggered in Airflow
     FAILED_SUBMIT = "failed_submit"  # Triggering the DAG run failed
@@ -79,23 +89,16 @@ class JobStatus(StrEnum):
     RUNNING = "running"  # DAG running
     SUCCESS = "success"  # DAG run completed successfully
     FAILED = "failed"  # DAG run failed
-=======
-    # TODO: This might change once the get Job endpoints are implemented and we align with the
-    # airflow status options.
-
-    # Job inserted, DAG run not (yet) triggered successfully in Airflow
-    SUBMITTING = "submitting"
-    # DAG run triggered in Airflow
-    QUEUED = "queued"
-    # Triggering the DAG run failed
-    FAILED = "failed"
->>>>>>> 9e5f173 (GPS-1011: Local airflow)
 
 
 class Job(Base):
     """A process run instance, backed by an airflow dag run."""
 
     __tablename__ = "job"
+    # Jobs are listed per process, newest first (see ProcessService.list_jobs)
+    __table_args__ = (
+        Index("ix_job_process_id_created_at", "process_id", desc("created_at"), desc("id")),
+    )
     # When you access a database-generated field like sgid or timestamps that is not yet loaded in
     # the Python object, SQLAlchemy fires an extra hidden query to fetch its value ("lazy load").
     # With async SQLAlchemy that hidden query would crash, so we configure SQLAlchemy to fetch the
@@ -115,7 +118,7 @@ class Job(Base):
     sgid: Mapped[str] = mapped_column(
         String(128), unique=True, server_default=text("typeid_generate('pjb')")
     )
-    process_id: Mapped[int] = mapped_column(ForeignKey("process.id"), index=True)
+    process_id: Mapped[int] = mapped_column(ForeignKey("process.id"))
     # lazy="raise": async sessions can't lazy-load, so fail loudly if a query forgot to load it
     process: Mapped[Process] = relationship(lazy="raise")
 

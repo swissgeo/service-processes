@@ -1,9 +1,6 @@
 import json
 from collections.abc import AsyncGenerator, Callable
-<<<<<<< HEAD
 from datetime import UTC, datetime
-=======
->>>>>>> 9e5f173 (GPS-1011: Local airflow)
 from typing import Any
 
 import httpx
@@ -16,11 +13,8 @@ import pytest
 from app.core import airflow
 from app.core.airflow import (
     AirflowClient,
-<<<<<<< HEAD
     AirflowDagRunResponse,
     AirflowError,
-=======
->>>>>>> 9e5f173 (GPS-1011: Local airflow)
     initialize_airflow_client,
     k8s_token_request,
     password_token_request,
@@ -214,7 +208,6 @@ async def test_token_request_failure_raises():
     finally:
         await client.aclose()
 
-<<<<<<< HEAD
     assert _cause_status(error.value) == 403
 
 
@@ -349,9 +342,6 @@ async def test_get_dag_run_not_found_raises():
         await client.aclose()
 
     assert _cause_status(error.value) == 404
-=======
-    assert error.value.response.status_code == 403
->>>>>>> 9e5f173 (GPS-1011: Local airflow)
 
 
 @pytest.mark.asyncio
