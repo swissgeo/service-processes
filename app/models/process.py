@@ -1,5 +1,5 @@
 from datetime import datetime
-from enum import StrEnum
+from enum import StrEnum, auto
 from types import MappingProxyType
 from typing import Any
 
@@ -81,10 +81,10 @@ class JobStatus(StrEnum):
     """Status of a job, stored as string."""
 
     # service-processes internal status options
-    SUBMITTING = "submitting"  # Job inserted, DAG run not (yet) triggered in Airflow
-    FAILED_SUBMIT = "failed_submit"  # Triggering the DAG run failed
+    SUBMITTING = auto()  # Job inserted, DAG run not (yet) triggered in Airflow
+    FAILED_SUBMIT = auto()  # Triggering the DAG run failed
 
-    # Airflow Dag run status options
+    # Airflow Dag run status options (must match the airflow states)
     QUEUED = "queued"  # DAG run triggered
     RUNNING = "running"  # DAG running
     SUCCESS = "success"  # DAG run completed successfully
