@@ -1,52 +1,156 @@
+import copy
+import uuid
 from collections.abc import Sequence
-from typing import Annotated
+from typing import Annotated, Any
 
+from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import Depends
 
+from app.core.airflow import AirflowClient, AirflowDep
 from app.core.database import DatabaseSessionDep
-from app.models.process import Process
+from app.models.process import Job, JobStatus, Process
 
 
 class ProcessService:
-    """Reads and manages processes."""
+    """Reads and manages processes.
 
-    def __init__(self, session: AsyncSession) -> None:
+    Every method runs its statements in an explicit `async with self.session.begin():` block, so
+    that transactions are short and none is open during external calls (authorization, Airflow).
+    A statement outside such a block would autobegin a transaction and make the next begin() fail.
+    """
+
+    def __init__(self, session: AsyncSession, airflow: AirflowClient) -> None:
         self.session = session
+        self.airflow = airflow
 
     async def list_processes(
         self, dataset_sgids: Sequence[str], limit: int, offset: int
     ) -> tuple[Sequence[Process], int]:
         """Return one page of processes of the given datasets and their total number."""
         in_datasets = Process.dataset_sgid.in_(dataset_sgids)
-        processes = await self.session.scalars(
-            select(Process).where(in_datasets).order_by(Process.name).limit(limit).offset(offset)
-        )
-        total = (
-            await self.session.scalar(select(func.count()).select_from(Process).where(in_datasets))
-            or 0
-        )
-        return processes.all(), total
+        async with self.session.begin():
+            processes = await self.session.scalars(
+                select(Process)
+                .where(in_datasets)
+                .order_by(Process.name)
+                .limit(limit)
+                .offset(offset)
+            )
+            total = await self.session.scalar(
+                select(func.count()).select_from(Process).where(in_datasets)
+            )
+            return processes.all(), total or 0
 
     async def get_process(self, sgid: str) -> Process | None:
         """Return the process with the given sgid, or None if it doesn't exist."""
-        return await self.session.scalar(select(Process).where(Process.sgid == sgid))
+        async with self.session.begin():
+            return await self.session.scalar(select(Process).where(Process.sgid == sgid))
 
     async def get_datasets(self, dataset_sgids: Sequence[str]) -> Sequence[tuple[str, str, str]]:
         """Get tuple of (dataset, unit, organization) of provided datasets."""
-        rows = await self.session.execute(
-            select(Process.dataset_sgid, Process.organization_unit_sgid, Process.organization_sgid)
-            .where(Process.dataset_sgid.in_(dataset_sgids))
-            .distinct()
-        )
-        return rows.tuples().all()
+        async with self.session.begin():
+            rows = await self.session.execute(
+                select(
+                    Process.dataset_sgid, Process.organization_unit_sgid, Process.organization_sgid
+                )
+                .where(Process.dataset_sgid.in_(dataset_sgids))
+                .distinct()
+            )
+            return rows.tuples().all()
+
+    async def execute_process(self, process: Process, inputs: dict[str, Any]) -> Job:
+        """Start a process and return the job tracking it.
+
+        The user inputs are validated against the process schema, mapped and merged into the
+        internal config and passed as conf to a new run of the process DAG in Airflow.
+
+        Raises InvalidInputsError if the inputs don't match the schema of the process.
+        """
+        errors = _validate_inputs(process.input_schema, inputs)
+        if errors:
+            raise InvalidInputsError(errors)
+        conf = _build_dag_conf(process.internal_config, process.parameter_mapping, inputs)
+
+        job = Job(process_id=process.id, dag_run_id=str(uuid.uuid7()), status=JobStatus.SUBMITTING)
+        async with self.session.begin():
+            self.session.add(job)  # eager_defaults: sgid etc. are fetched on insert
+
+        try:
+            await self.airflow.trigger_dag_run(process.dag_id, job.dag_run_id, conf)
+        except Exception:
+            async with self.session.begin():
+                job.status = JobStatus.FAILED
+            raise
+
+        async with self.session.begin():
+            job.status = JobStatus.QUEUED
+        return job
+
+
+class InvalidInputsError(Exception):
+    """The user inputs don't match the JSON schema of the process."""
+
+    def __init__(self, errors: list[dict[str, Any]]) -> None:
+        super().__init__("Invalid process inputs")
+        self.errors = errors
 
 
 # FastAPI dependency injection function and definitions
-def get_process_service(session: DatabaseSessionDep) -> ProcessService:
-    return ProcessService(session)
+def get_process_service(session: DatabaseSessionDep, airflow: AirflowDep) -> ProcessService:
+    return ProcessService(session, airflow)
 
 
 ProcessServiceDep = Annotated[ProcessService, Depends(get_process_service)]
+
+
+def _validate_inputs(schema: dict[str, Any], inputs: dict[str, Any]) -> list[dict[str, Any]]:
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    return [
+        {
+            "loc": ["body", "inputs", *error.absolute_path],
+            "msg": error.message,
+            "type": error.validator,
+        }
+        for error in validator.iter_errors(inputs)
+    ]
+
+
+def _build_dag_conf(
+    internal_config: dict[str, Any],
+    parameter_mapping: dict[str, str],
+    inputs: dict[str, Any],
+) -> dict[str, Any]:
+    """Combine fixed internal values and mapped user inputs into the conf of a DAG run.
+
+    Example: mapping {"startDate": "options.date_range.start"} and inputs
+    {"startDate": "2026-01-01"} result in {"options": {"date_range": {"start": "2026-01-01"}}}
+    merged into internal_config.
+
+    If anything in input already exists in internal_config, an error is raised.
+    """
+    conf = copy.deepcopy(internal_config)  # to not change the ORM attribute values
+    for name, value in inputs.items():
+        path = parameter_mapping.get(name)
+        if path is None:
+            # Each user input must have a mapping
+            raise ValueError(f"No parameter mapping for input '{name}'")
+        _set_path(conf, path.split("."), value)
+    return conf
+
+
+def _set_path(target: dict[str, Any], keys: list[str], value: Any) -> None:
+    """Sets the value under the path keys in the target. If a value already
+    exists in the target, an error is raised.
+    """
+    *parents, last = keys
+    for key in parents:
+        target = target.setdefault(key, {})
+        if not isinstance(target, dict):
+            raise TypeError(f"Cannot set {'.'.join(keys)}: {key} is not an object")
+    if last in target:
+        # This prevents user input from overwriting anything in internal_config.
+        raise ValueError(f"{'.'.join(keys)} is already set by internal_config")
+    target[last] = value

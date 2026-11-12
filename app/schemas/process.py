@@ -49,7 +49,7 @@ class Process(BaseModel):
             sgid=process.sgid,
             name=process.name,
             description=process.description,
-            inputs=process.user_parameter_schema,
+            inputs=process.input_schema,
         )
 
 
@@ -58,4 +58,27 @@ class ProcessResponse(Process):
 
 
 class ListProcessesResponse(PaginatedResponse[Process]):
+    pass
+
+
+class ProcessInput(BaseModel):
+    inputs: dict[str, Any] = Field(
+        description="Parameters of the process, must match the JSON schema in `inputs` of the "
+        "process"
+    )
+
+
+class Job(BaseModel):
+    sgid: SgidStr = Field(description="Identifier of the job")
+    status: str = Field(description="Status of the job", examples=["queued"])
+
+    @classmethod
+    def from_model(cls, job: models.Job) -> Self:
+        return cls(
+            sgid=job.sgid,
+            status=job.status,
+        )
+
+
+class JobResponse(Job):
     pass

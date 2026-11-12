@@ -56,7 +56,7 @@ async def test_database_lifecycle_initializes_and_clears_application_state() -> 
     await initialize_database(app, settings)
     try:
         assert app.state.database_engine.url.render_as_string(hide_password=False) == (
-            "postgresql+asyncpg://service_processes:service_processes@localhost:15432/service_processes"
+            "postgresql+asyncpg://user:pw@localhost:5432/processes"
         )
         assert app.state.database_session_maker.kw["expire_on_commit"] is False
     finally:

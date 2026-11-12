@@ -13,17 +13,6 @@ from app.settings import Settings
 REQUIRED_DB_SETTINGS = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PW")
 
 
-@pytest.fixture(autouse=True)
-def required_db_settings(monkeypatch: pytest.MonkeyPatch):
-    # The database connection settings have no defaults and must always be provided, so set
-    # valid values that individual tests can override or delete.
-    monkeypatch.setenv("DB_HOST", "localhost")
-    monkeypatch.setenv("DB_PORT", "5432")
-    monkeypatch.setenv("DB_NAME", "processes")
-    monkeypatch.setenv("DB_USER", "user")
-    monkeypatch.setenv("DB_PW", "pw")
-
-
 def test_defaults(monkeypatch: pytest.MonkeyPatch):
     # `_env_file=None` only disables pydantic-settings' own dotenv loading, it does not
     # prevent pydantic from reading real OS environment variables, so we clear them here

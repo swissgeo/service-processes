@@ -22,6 +22,19 @@ def required_avp_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
+    # Required as well, no requests are sent to it on startup
+    monkeypatch.setenv("AIRFLOW_HOST", "http://airflow.test")
+    # .env.default enables the local Airflow login, tests must use the real one by default
+    monkeypatch.setenv("USE_LOCAL_AIRFLOW", "false")
+    monkeypatch.delenv("AIRFLOW_LOCAL_USERNAME", raising=False)
+    monkeypatch.delenv("AIRFLOW_LOCAL_PASSWORD", raising=False)
+    # The database connection settings have no defaults and must always be provided, so set
+    # valid values that individual tests can override or delete.
+    monkeypatch.setenv("DB_HOST", "localhost")
+    monkeypatch.setenv("DB_PORT", "5432")
+    monkeypatch.setenv("DB_NAME", "processes")
+    monkeypatch.setenv("DB_USER", "user")
+    monkeypatch.setenv("DB_PW", "pw")
 
 
 @pytest.fixture

@@ -15,8 +15,8 @@ from app.core.authorization import (
     get_authorizer,
     process_resource,
 )
-from app.core.process_service import ProcessService, get_process_service
-from app.models.process import Process
+from app.core.process_service import InvalidInputsError, ProcessService, get_process_service
+from app.models.process import Job, Process
 from app.schemas.pagination import DEFAULT_LIMIT, MAX_LIMIT
 from app.schemas.process import MAX_DATASETS, SGID_MAX_LENGTH
 
@@ -24,6 +24,13 @@ TOKEN = "header.payload.signature"  # noqa: S105
 AUTH_HEADERS = {"X-Auth-Request-Access-Token": TOKEN}
 
 DATASET = "0195f3a2-7c1e-7b3a-9d4e-000000000001"
+
+# Published schema of PROCESS: unknown inputs are always forbidden, see Process.input_schema
+PUBLISHED_INPUTS = {
+    "type": "object",
+    "properties": {"startDate": {"type": "string"}},
+    "additionalProperties": False,
+}
 
 PROCESS = Process(
     sgid="0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e",
@@ -76,7 +83,7 @@ def test_list_processes(client: TestClient, process_service: AsyncMock):
                 "sgid": "0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e",
                 "name": "Dummy export",
                 "description": "Dummy process",
-                "inputs": {"type": "object", "properties": {"startDate": {"type": "string"}}},
+                "inputs": PUBLISHED_INPUTS,
             }
         ],
         "total": 1,
@@ -275,7 +282,7 @@ def test_get_process(client: TestClient, process_service: AsyncMock, authorizer:
         "sgid": "0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e",
         "name": "Dummy export",
         "description": "Dummy process",
-        "inputs": {"type": "object", "properties": {"startDate": {"type": "string"}}},
+        "inputs": PUBLISHED_INPUTS,
     }
     process_service.get_process.assert_awaited_once_with(PROCESS.sgid)
     authorizer.is_authorized.assert_awaited_once_with(
@@ -358,3 +365,69 @@ def test_get_process_not_found(
     assert response.status_code == 404
     assert response.json() == {"error": "Not Found", "message": "Process not found"}
     authorizer.is_authorized.assert_not_awaited()
+
+
+def test_execute_process(client: TestClient, process_service: AsyncMock, authorizer: AsyncMock):
+    process_service.get_process.return_value = PROCESS
+    process_service.execute_process.return_value = Job(sgid="pjb_123", status="queued")
+
+    response = client.post(
+        f"/processes/{PROCESS.sgid}/execute",
+        json={"inputs": {"startDate": "2026-01-01"}},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"sgid": "pjb_123", "status": "queued"}
+    authorizer.is_authorized.assert_awaited_once_with(
+        TOKEN, Action.EXECUTE_PROCESS, process_resource(PROCESS)
+    )
+    process_service.execute_process.assert_awaited_once_with(PROCESS, {"startDate": "2026-01-01"})
+
+
+def test_execute_process_forbidden(
+    client: TestClient, process_service: AsyncMock, authorizer: AsyncMock
+):
+    process_service.get_process.return_value = PROCESS
+    authorizer.is_authorized.return_value = False
+
+    response = client.post(
+        f"/processes/{PROCESS.sgid}/execute", json={"inputs": {}}, headers=AUTH_HEADERS
+    )
+
+    assert response.status_code == 403
+    process_service.execute_process.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("authorizer")
+def test_execute_process_not_found(client: TestClient, process_service: AsyncMock):
+    process_service.get_process.return_value = None
+
+    response = client.post(
+        f"/processes/{uuid.uuid7()}/execute", json={"inputs": {}}, headers=AUTH_HEADERS
+    )
+
+    assert response.status_code == 404
+    process_service.execute_process.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("authorizer")
+def test_execute_process_invalid_inputs(client: TestClient, process_service: AsyncMock):
+    process_service.get_process.return_value = PROCESS
+    errors = [
+        {"loc": ["body", "inputs", "startDate"], "msg": "1 is not of type 'string'", "type": "type"}
+    ]
+    process_service.execute_process.side_effect = InvalidInputsError(errors)
+
+    response = client.post(
+        f"/processes/{PROCESS.sgid}/execute",
+        json={"inputs": {"startDate": 1}},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "Validation Error",
+        "message": "Invalid request payload",
+        "detail": errors,
+    }
