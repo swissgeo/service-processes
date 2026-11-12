@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Annotated, Any, Self
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic_core import PydanticCustomError
+
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from app.models import process as models
 from app.schemas.pagination import PaginatedResponse, PaginationParams
@@ -13,6 +15,7 @@ SgidStr = Annotated[str, Field(min_length=1, max_length=SGID_MAX_LENGTH)]
 
 # Max 30 datasets in query as this is the limit of a batch request to AWS Verified permissions.
 MAX_DATASETS = 30
+MAX_PROCESSES = 30
 
 
 def _split_comma_separated(value: Any) -> Any:
@@ -69,8 +72,50 @@ class ProcessInput(BaseModel):
     )
 
 
+class ListJobsParams(PaginationParams):
+    """Query parameters of the list jobs endpoint.
+
+    At least one of datasets or processes is required. All given filters must match (AND).
+    """
+
+    processes: Annotated[
+        list[SgidStr] | None,
+        Field(
+            description=f"Comma separated IDs of the processes (1 to {MAX_PROCESSES})",
+            min_length=1,
+            max_length=MAX_PROCESSES,
+        ),
+        BeforeValidator(_split_comma_separated),
+    ] = None
+    datasets: Annotated[
+        list[SgidStr] | None,
+        Field(
+            description=f"Comma separated IDs of the datasets (1 to {MAX_DATASETS})",
+            min_length=1,
+            max_length=MAX_DATASETS,
+        ),
+        BeforeValidator(_split_comma_separated),
+    ] = None
+    status: Annotated[
+        list[models.JobStatus] | None,
+        Field(description="Comma separated job statuses", min_length=1),
+        BeforeValidator(_split_comma_separated),
+    ] = None
+
+    @model_validator(mode="after")
+    def require_scope(self) -> Self:
+        # Authorization is checked per process, so the processes to authorize must be known
+        if self.processes is None and self.datasets is None:
+            # Not a ValueError: its exception object in the error context isn't JSON serializable
+            raise PydanticCustomError(
+                "missing_scope", "At least one of 'processes' or 'datasets' is required"
+            )
+        return self
+
+
 class Job(BaseModel):
     sgid: SgidStr = Field(description="Identifier of the job")
+    process_sgid: SgidStr = Field(description="Identifier of the process the job runs")
     status: str = Field(description="Status of the job", examples=["queued"])
     created_at: datetime = Field(description="When the Job was initialized")
     started_at: datetime | None = Field(description="When the Job started to run")
@@ -80,6 +125,7 @@ class Job(BaseModel):
     def from_model(cls, job: models.Job) -> Self:
         return cls(
             sgid=job.sgid,
+            process_sgid=job.process.sgid,
             status=job.status,
             created_at=job.created_at,
             started_at=job.started_at,
@@ -88,4 +134,8 @@ class Job(BaseModel):
 
 
 class JobResponse(Job):
+    pass
+
+
+class ListJobsResponse(PaginatedResponse[Job]):
     pass

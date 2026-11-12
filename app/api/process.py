@@ -11,7 +11,10 @@ from app.core.authorization import (
 )
 from app.core.process_service import InvalidInputsError, ProcessServiceDep
 from app.schemas.process import (
+    Job,
     JobResponse,
+    ListJobsParams,
+    ListJobsResponse,
     ListProcessesParams,
     ListProcessesResponse,
     Process,
@@ -80,6 +83,33 @@ async def execute_process(
         # Same response (400) as for other invalid request payloads
         raise RequestValidationError(error.errors) from None
     return JobResponse.from_model(job)
+
+
+@router.get("/jobs", summary="List jobs")
+async def list_jobs(
+    service: ProcessServiceDep,
+    authorization: AuthorizationDep,
+    params: Annotated[ListJobsParams, Query()],
+) -> ListJobsResponse:
+    """List the jobs of the given processes and/or datasets the user may access, newest first,
+    paginated. At least one of `processes` or `datasets` is required, all filters must match.
+    """
+    processes = await service.get_processes(params.processes, params.datasets)
+    allowed = {
+        resource.id
+        for resource in await authorization.filter(
+            Action.GET_PROCESS, [process_resource(p) for p in processes]
+        )
+    }
+    jobs, total = await service.list_jobs(
+        [p.id for p in processes if p.sgid in allowed], params.status, params.limit, params.offset
+    )
+    return ListJobsResponse(
+        items=[Job.from_model(job) for job in jobs],
+        total=total,
+        limit=params.limit,
+        offset=params.offset,
+    )
 
 
 @router.get("/jobs/{sgid}", summary="Get job details")

@@ -49,9 +49,9 @@ def _session() -> AsyncMock:
     return session
 
 
-def _mock_session(processes: list[Process], total: int | None) -> AsyncMock:
+def _mock_session(rows: list[Any], total: int | None) -> AsyncMock:
     session = _session()
-    session.scalars.return_value = MagicMock(all=MagicMock(return_value=processes))
+    session.scalars.return_value = MagicMock(all=MagicMock(return_value=rows))
     session.scalar.return_value = total
     return session
 
@@ -439,3 +439,137 @@ async def test_get_updated_job_keeps_status_if_airflow_fails(caplog: pytest.LogC
     assert job.status == JobStatus.RUNNING
     session.on_commit.assert_not_called()
     assert "Could not refresh job pjb_123 from Airflow" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("process_sgids", "dataset_sgids", "expected_where"),
+    [
+        (["prc_1"], None, "WHERE process.sgid IN ('prc_1') ORDER BY"),
+        (None, ["ds_1"], "WHERE process.dataset_sgid IN ('ds_1') ORDER BY"),
+        (
+            ["prc_1"],
+            ["ds_1"],
+            "WHERE process.sgid IN ('prc_1') AND process.dataset_sgid IN ('ds_1') ORDER BY",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_processes_filters(
+    process_sgids: list[str] | None, dataset_sgids: list[str] | None, expected_where: str
+):
+    processes = [_process()]
+    session = _mock_session(processes, total=None)
+
+    result = await ProcessService(session, MagicMock()).get_processes(process_sgids, dataset_sgids)
+
+    assert result == processes
+    assert expected_where in _compile(session.scalars.await_args.args[0])
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_without_processes_skips_queries():
+    session = _session()
+    airflow = AsyncMock(spec=AirflowClient)
+
+    result = await ProcessService(session, airflow).list_jobs([], None, limit=20, offset=0)
+
+    assert result == ([], 0)
+    session.begin.assert_not_called()
+    airflow.get_dag_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_refreshes_before_query():
+    jobs = [_job(JobStatus.SUCCESS)]
+    session = _mock_session(jobs, total=3)
+    service = ProcessService(session, MagicMock())
+    calls: list[str] = []
+    service.refresh_active_jobs = AsyncMock(side_effect=lambda _ids: calls.append("refresh"))
+    session.scalars.side_effect = lambda *_: calls.append("query") or DEFAULT
+
+    result = await service.list_jobs([1], None, limit=20, offset=0)
+
+    assert result == (jobs, 3)
+    assert calls == ["refresh", "query"]
+    service.refresh_active_jobs.assert_awaited_once_with([1])
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_query():
+    session = _mock_session([], total=0)
+    service = ProcessService(session, MagicMock())
+    service.refresh_active_jobs = AsyncMock()
+
+    await service.list_jobs(
+        [1, 2], [JobStatus.QUEUED, JobStatus.FAILED_SUBMIT], limit=20, offset=40
+    )
+
+    statement = _compile(session.scalars.await_args.args[0])
+    assert "JOIN process" in statement
+    assert (
+        "WHERE job.process_id IN (1, 2) AND job.status IN ('queued', 'failed_submit') "
+        "ORDER BY job.created_at DESC, job.id DESC \n LIMIT 20 OFFSET 40"
+    ) in statement
+    assert _compile(session.scalar.await_args.args[0]) == (
+        "SELECT count(*) AS count_1 \nFROM job \n"
+        "WHERE job.process_id IN (1, 2) AND job.status IN ('queued', 'failed_submit')"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_without_status_filter():
+    session = _mock_session([], total=0)
+    service = ProcessService(session, MagicMock())
+    service.refresh_active_jobs = AsyncMock()
+
+    await service.list_jobs([1], None, limit=20, offset=0)
+
+    assert _compile(session.scalar.await_args.args[0]) == (
+        "SELECT count(*) AS count_1 \nFROM job \nWHERE job.process_id IN (1)"
+    )
+
+
+@pytest.mark.asyncio
+async def testrefresh_active_jobs_queries_active_jobs_of_processes():
+    session = _mock_session([], total=None)
+    airflow = AsyncMock(spec=AirflowClient)
+
+    await ProcessService(session, airflow).refresh_active_jobs([1, 2])
+
+    statement = _compile(session.scalars.await_args.args[0])
+    assert "JOIN process" in statement
+    assert "WHERE job.process_id IN (1, 2) AND job.status IN ('queued', 'running')" in statement
+    airflow.get_dag_run.assert_not_awaited()
+    session.on_commit.assert_called_once()  # only the select, nothing to write
+
+
+@pytest.mark.asyncio
+async def testrefresh_active_jobs_updates_jobs(caplog: pytest.LogCaptureFixture):
+    finished = _job(JobStatus.RUNNING)
+    unreachable = Job(
+        sgid="pjb_456", dag_run_id="run-2", status=JobStatus.QUEUED, process=_process()
+    )
+    session = _mock_session([finished, unreachable], total=None)
+    in_transaction_during_airflow: list[bool] = []
+    airflow = AsyncMock(spec=AirflowClient)
+    started_at = datetime(2026, 1, 1, 10, 0, 5, tzinfo=UTC)
+    finished_at = datetime(2026, 1, 1, 10, 1, 0, tzinfo=UTC)
+
+    async def get_dag_run(_dag_id: str, dag_run_id: str) -> AirflowDagRunResponse:
+        # Only the initial select must have been committed, no transaction open
+        in_transaction_during_airflow.append(session.on_commit.call_count != 1)
+        if dag_run_id == "run-2":
+            raise AirflowError("airflow down")
+        return AirflowDagRunResponse(state="success", start_date=started_at, end_date=finished_at)
+
+    airflow.get_dag_run.side_effect = get_dag_run
+
+    await ProcessService(session, airflow).refresh_active_jobs([1])
+
+    assert in_transaction_during_airflow == [False, False]
+    assert finished.status == JobStatus.SUCCESS
+    assert finished.started_at == started_at
+    assert finished.finished_at == finished_at
+    assert unreachable.status == JobStatus.QUEUED
+    assert session.on_commit.call_count == 2  # select + write of the results
+    assert "Could not refresh job pjb_456 from Airflow" in caplog.text

@@ -17,9 +17,9 @@ from app.core.authorization import (
     process_resource,
 )
 from app.core.process_service import InvalidInputsError, ProcessService, get_process_service
-from app.models.process import Job, Process
+from app.models.process import Job, JobStatus, Process
 from app.schemas.pagination import DEFAULT_LIMIT, MAX_LIMIT
-from app.schemas.process import MAX_DATASETS, SGID_MAX_LENGTH
+from app.schemas.process import MAX_DATASETS, MAX_PROCESSES, SGID_MAX_LENGTH
 
 TOKEN = "header.payload.signature"  # noqa: S105
 AUTH_HEADERS = {"X-Auth-Request-Access-Token": TOKEN}
@@ -35,6 +35,7 @@ PUBLISHED_INPUTS = {
 }
 
 PROCESS = Process(
+    id=7,
     sgid="0195f3a2-7c1e-7b3a-9d4e-1f2a3b4c5d6e",
     organization_sgid=str(uuid.uuid7()),
     organization_unit_sgid=str(uuid.uuid7()),
@@ -372,7 +373,7 @@ def test_get_process_not_found(
 def test_execute_process(client: TestClient, process_service: AsyncMock, authorizer: AsyncMock):
     process_service.get_process.return_value = PROCESS
     process_service.execute_process.return_value = Job(
-        sgid="pjb_123", status="queued", created_at=CREATED_AT
+        sgid="pjb_123", status="queued", created_at=CREATED_AT, process=PROCESS
     )
 
     response = client.post(
@@ -384,6 +385,7 @@ def test_execute_process(client: TestClient, process_service: AsyncMock, authori
     assert response.status_code == 200
     assert response.json() == {
         "sgid": "pjb_123",
+        "process_sgid": PROCESS.sgid,
         "status": "queued",
         "created_at": "2026-01-01T10:00:00Z",
         "started_at": None,
@@ -451,6 +453,7 @@ def test_get_job(client: TestClient, process_service: AsyncMock, authorizer: Asy
     process_service.get_updated_job.return_value = Job(
         sgid="pjb_123",
         status="success",
+        process=PROCESS,
         created_at=CREATED_AT,
         started_at=CREATED_AT + timedelta(seconds=5),
         finished_at=CREATED_AT + timedelta(minutes=1),
@@ -461,6 +464,7 @@ def test_get_job(client: TestClient, process_service: AsyncMock, authorizer: Asy
     assert response.status_code == 200
     assert response.json() == {
         "sgid": "pjb_123",
+        "process_sgid": PROCESS.sgid,
         "status": "success",
         "created_at": "2026-01-01T10:00:00Z",
         "started_at": "2026-01-01T10:00:05Z",
@@ -508,3 +512,170 @@ def test_get_job_without_token(client: TestClient):
     response = client.get(f"/jobs/{JOB.sgid}")
 
     assert response.status_code == 401
+
+
+# List jobs
+
+PROCESS_ID = PROCESS.id
+OTHER_PROCESS = Process(
+    id=8,
+    sgid="prc_other",
+    organization_sgid=PROCESS.organization_sgid,
+    organization_unit_sgid=PROCESS.organization_unit_sgid,
+    dataset_sgid=DATASET,
+)
+LISTED_JOB = Job(sgid="pjb_123", status="running", created_at=CREATED_AT, process=PROCESS)
+
+
+@pytest.fixture
+def job_service(process_service: AsyncMock) -> AsyncMock:
+    process_service.get_processes.return_value = [PROCESS]
+    process_service.list_jobs.return_value = ([LISTED_JOB], 1)
+    return process_service
+
+
+def test_list_jobs(client: TestClient, job_service: AsyncMock, authorizer: AsyncMock):
+    response = client.get(f"/jobs?processes={PROCESS.sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "sgid": "pjb_123",
+                "process_sgid": PROCESS.sgid,
+                "status": "running",
+                "created_at": "2026-01-01T10:00:00Z",
+                "started_at": None,
+                "finished_at": None,
+            }
+        ],
+        "total": 1,
+        "limit": DEFAULT_LIMIT,
+        "offset": 0,
+    }
+    job_service.get_processes.assert_awaited_once_with([PROCESS.sgid], None)
+    authorizer.batch_is_authorized.assert_awaited_once_with(
+        TOKEN, Action.GET_PROCESS, [process_resource(PROCESS)]
+    )
+    job_service.list_jobs.assert_awaited_once_with([PROCESS_ID], None, DEFAULT_LIMIT, 0)
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_processes", "expected_datasets"),
+    [
+        ("?processes=a,b", ["a", "b"], None),
+        ("?datasets=d1&datasets=d2", None, ["d1", "d2"]),
+        ("?processes=a&datasets=d1", ["a"], ["d1"]),
+    ],
+)
+@pytest.mark.usefixtures("authorizer")
+def test_list_jobs_scope(
+    client: TestClient,
+    job_service: AsyncMock,
+    query: str,
+    expected_processes: list[str] | None,
+    expected_datasets: list[str] | None,
+):
+    response = client.get(f"/jobs{query}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    job_service.get_processes.assert_awaited_once_with(expected_processes, expected_datasets)
+
+
+@pytest.mark.usefixtures("authorizer")
+def test_list_jobs_status_and_pagination(client: TestClient, job_service: AsyncMock):
+    response = client.get(
+        f"/jobs?processes={PROCESS.sgid}&status=queued,running&limit=20&offset=40",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["limit"] == 20
+    assert response.json()["offset"] == 40
+    job_service.list_jobs.assert_awaited_once_with(
+        [PROCESS_ID], [JobStatus.QUEUED, JobStatus.RUNNING], 20, 40
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "",
+        "?status=running",
+        "?processes=",
+        "?datasets=,",
+        "?processes=" + ",".join(["p"] * (MAX_PROCESSES + 1)),
+        "?datasets=" + ",".join(["d"] * (MAX_DATASETS + 1)),
+        "?processes=" + "a" * (SGID_MAX_LENGTH + 1),
+        f"?processes={PROCESS.sgid}&status=unknown",
+        f"?processes={PROCESS.sgid}&status=",
+    ],
+)
+@pytest.mark.usefixtures("authorizer")
+def test_list_jobs_invalid_query(client: TestClient, job_service: AsyncMock, query: str):
+    response = client.get(f"/jobs{query}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 400
+    job_service.get_processes.assert_not_awaited()
+    job_service.list_jobs.assert_not_awaited()
+
+
+def test_list_jobs_only_of_allowed_processes(
+    client: TestClient, job_service: AsyncMock, authorizer: AsyncMock
+):
+    job_service.get_processes.return_value = [PROCESS, OTHER_PROCESS]
+    authorizer.batch_is_authorized.side_effect = lambda _token, _action, resources: [
+        resource for resource in resources if resource.id == OTHER_PROCESS.sgid
+    ]
+
+    response = client.get(f"/jobs?datasets={DATASET}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    authorizer.batch_is_authorized.assert_awaited_once_with(
+        TOKEN, Action.GET_PROCESS, [process_resource(PROCESS), process_resource(OTHER_PROCESS)]
+    )
+    job_service.list_jobs.assert_awaited_once_with([OTHER_PROCESS.id], None, DEFAULT_LIMIT, 0)
+
+
+def test_list_jobs_all_processes_denied(
+    client: TestClient, job_service: AsyncMock, authorizer: AsyncMock
+):
+    job_service.list_jobs.return_value = ([], 0)
+    authorizer.batch_is_authorized.side_effect = None
+    authorizer.batch_is_authorized.return_value = []
+
+    response = client.get(f"/jobs?processes={PROCESS.sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "total": 0, "limit": DEFAULT_LIMIT, "offset": 0}
+    job_service.list_jobs.assert_awaited_once_with([], None, DEFAULT_LIMIT, 0)
+
+
+def test_list_jobs_authorization_unavailable(
+    client: TestClient, job_service: AsyncMock, authorizer: AsyncMock
+):
+    authorizer.batch_is_authorized.side_effect = AuthorizationError("unavailable")
+
+    response = client.get(f"/jobs?processes={PROCESS.sgid}", headers=AUTH_HEADERS)
+
+    assert response.status_code == 503
+    # Unauthorized users must not trigger calls to Airflow
+    job_service.list_jobs.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("authorizer")
+def test_list_jobs_without_token(client: TestClient, job_service: AsyncMock):
+    response = client.get(f"/jobs?processes={PROCESS.sgid}")
+
+    assert response.status_code == 401
+    job_service.list_jobs.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("authorizer", "job_service")
+def test_list_jobs_missing_scope_message(client: TestClient):
+    response = client.get("/jobs?status=running", headers=AUTH_HEADERS)
+
+    assert response.status_code == 400
+    assert response.json()["detail"][0]["msg"] == (
+        "At least one of 'processes' or 'datasets' is required"
+    )
