@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import logging
 import uuid
@@ -11,11 +12,18 @@ from sqlalchemy.orm import joinedload
 
 from fastapi import Depends
 
-from app.core.airflow import AirflowClient, AirflowDep, AirflowError
+from app.core.airflow import AirflowClient, AirflowDagRunResponse, AirflowDep, AirflowError
 from app.core.database import DatabaseSessionDep
 from app.models.process import Job, JobStatus, Process
 
 logger = logging.getLogger(__name__)
+
+# Statuses of jobs whose dag run can still change in Airflow. Not included: SUBMITTING and
+# FAILED_SUBMIT (the dag run doesn't (yet) exist), SUCCESS and FAILED (the dag run finished).
+ACTIVE_STATUSES = (JobStatus.QUEUED, JobStatus.RUNNING)
+
+# Maximum number of concurrent requests to Airflow when refreshing jobs
+MAX_CONCURRENT_AIRFLOW_REQUESTS = 10
 
 
 class ProcessService:
@@ -65,6 +73,18 @@ class ProcessService:
             )
             return rows.tuples().all()
 
+    async def get_processes(
+        self, process_sgids: Sequence[str] | None, dataset_sgids: Sequence[str] | None
+    ) -> Sequence[Process]:
+        """Return the processes matching all given filters (a None filter is ignored)."""
+        statement = select(Process).order_by(Process.id)
+        if process_sgids is not None:
+            statement = statement.where(Process.sgid.in_(process_sgids))
+        if dataset_sgids is not None:
+            statement = statement.where(Process.dataset_sgid.in_(dataset_sgids))
+        async with self.session.begin():
+            return (await self.session.scalars(statement)).all()
+
     async def execute_process(self, process: Process, inputs: dict[str, Any]) -> Job:
         """Start a process and return the job tracking it.
 
@@ -78,7 +98,12 @@ class ProcessService:
             raise InvalidInputsError(errors)
         conf = _build_dag_conf(process.internal_config, process.parameter_mapping, inputs)
 
-        job = Job(process_id=process.id, dag_run_id=str(uuid.uuid7()), status=JobStatus.SUBMITTING)
+        job = Job(
+            process_id=process.id,
+            process=process,  # set, so that the response can include the process sgid
+            dag_run_id=str(uuid.uuid7()),
+            status=JobStatus.SUBMITTING,
+        )
         async with self.session.begin():
             self.session.add(job)  # eager_defaults: sgid etc. are fetched on insert
 
@@ -104,12 +129,7 @@ class ProcessService:
         """Return the job after getting the latest information from the airflow dag run.
         Only get the dag run information if the job state shows there might be a change.
         """
-        if job.status in (
-            JobStatus.SUBMITTING,  # internal state -> dag run does not (yet) exist in airflow
-            JobStatus.FAILED_SUBMIT,  # internal state -> dag run does not exist in airflow
-            JobStatus.SUCCESS,  # dag run finished, no updates to get
-            JobStatus.FAILED,  # dag run finished, no updates to get
-        ):
+        if job.status not in ACTIVE_STATUSES:
             return job
         try:
             dag_run_details = await self.airflow.get_dag_run(job.process.dag_id, job.dag_run_id)
@@ -117,10 +137,75 @@ class ProcessService:
             logger.warning("Could not refresh job %s from Airflow", job.sgid, exc_info=True)
             return job
         async with self.session.begin():
-            job.status = dag_run_details.state
-            job.started_at = dag_run_details.start_date
-            job.finished_at = dag_run_details.end_date
+            _apply_dag_run(job, dag_run_details)
         return job
+
+    async def list_jobs(
+        self,
+        process_ids: Sequence[int],
+        statuses: Sequence[JobStatus] | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[Sequence[Job], int]:
+        """Return one page of jobs of the given processes, newest first, and their total number.
+
+        Active jobs are refreshed from Airflow first, so that the status filter and the returned
+        statuses are up to date.
+        """
+        if not process_ids:
+            return [], 0
+        await self.refresh_active_jobs(process_ids)
+
+        conditions = [Job.process_id.in_(process_ids)]
+        if statuses is not None:
+            conditions.append(Job.status.in_(statuses))
+        async with self.session.begin():
+            jobs = await self.session.scalars(
+                select(Job)
+                .options(joinedload(Job.process))
+                .where(*conditions)
+                .order_by(Job.created_at.desc(), Job.id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            total = await self.session.scalar(
+                select(func.count()).select_from(Job).where(*conditions)
+            )
+            return jobs.all(), total or 0
+
+    async def refresh_active_jobs(self, process_ids: Sequence[int]) -> None:
+        """Update all active jobs of the given processes with their dag run in Airflow.
+
+        Jobs whose dag run can't be fetched keep their status (logged as warning).
+        """
+        async with self.session.begin():
+            jobs = (
+                await self.session.scalars(
+                    select(Job)
+                    .options(joinedload(Job.process))
+                    .where(Job.process_id.in_(process_ids), Job.status.in_(ACTIVE_STATUSES))
+                )
+            ).all()
+        if not jobs:
+            return
+
+        # Requests to Airflow run concurrently (limited), outside of any transaction. The session
+        # must not be used concurrently, so the results are written afterwards in one transaction.
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_AIRFLOW_REQUESTS)
+
+        async def get_dag_run(job: Job) -> AirflowDagRunResponse | None:
+            async with semaphore:
+                try:
+                    return await self.airflow.get_dag_run(job.process.dag_id, job.dag_run_id)
+                except AirflowError:
+                    logger.warning("Could not refresh job %s from Airflow", job.sgid, exc_info=True)
+                    return None
+
+        dag_runs = await asyncio.gather(*(get_dag_run(job) for job in jobs))
+        async with self.session.begin():
+            for job, dag_run in zip(jobs, dag_runs, strict=True):
+                if dag_run is not None:
+                    _apply_dag_run(job, dag_run)
 
 
 class InvalidInputsError(Exception):
@@ -137,6 +222,12 @@ def get_process_service(session: DatabaseSessionDep, airflow: AirflowDep) -> Pro
 
 
 ProcessServiceDep = Annotated[ProcessService, Depends(get_process_service)]
+
+
+def _apply_dag_run(job: Job, dag_run: AirflowDagRunResponse) -> None:
+    job.status = dag_run.state
+    job.started_at = dag_run.start_date
+    job.finished_at = dag_run.end_date
 
 
 def _validate_inputs(schema: dict[str, Any], inputs: dict[str, Any]) -> list[dict[str, Any]]:

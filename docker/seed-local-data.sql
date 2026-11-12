@@ -1,6 +1,7 @@
 -- Sample data for local development, loaded with `make db-seed` (after `make db-upgrade`).
 -- Idempotent: re-running it updates the rows to the values below.
 
+-- Triggers the dummy DAG in docker/airflow/dags/local_dummy_dag.py
 INSERT INTO process (
     organization_sgid,
     organization_unit_sgid,
