@@ -112,6 +112,9 @@ async def test_token_is_exchanged_for_k8s_token(
     (request,) = fake_airflow.token_requests
     assert request.method == "POST"
     assert request.headers["Authorization"] == f"Bearer {K8S_TOKEN}"
+    # Airflow rejects POST /auth/token without a JSON body with 422
+    assert request.headers["Content-Type"] == "application/json"
+    assert json.loads(request.content) == {}
 
 
 @pytest.mark.usefixtures("clock")
