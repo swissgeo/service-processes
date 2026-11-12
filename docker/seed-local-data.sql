@@ -1,7 +1,6 @@
 -- Sample data for local development, loaded with `make db-seed` (after `make db-upgrade`).
 -- Idempotent: re-running it updates the rows to the values below.
 
--- Triggers the dummy DAG in docker/airflow/dags/local_dummy_dag.py
 INSERT INTO process (
     organization_sgid,
     organization_unit_sgid,
@@ -14,6 +13,7 @@ INSERT INTO process (
     internal_config,
     parameter_mapping
 ) VALUES (
+    -- Triggers the dummy DAG in docker/airflow/dags/local_dummy_dag.py
     'org_developers',
     'default',
     'dat_some-local-dataset',
@@ -21,6 +21,24 @@ INSERT INTO process (
     'Dummy Process',
     'Example process to use during local development',
     'developers-some_local_dataset_dummy',
+    '{
+        "type": "object",
+        "properties": {
+            "file": {"type": "string"}
+        },
+        "required": ["file"]
+    }',
+    '{}',
+    '{"file": "file"}'
+), (
+    -- Triggers the failing dummy DAG in docker/airflow/dags/local_dummy_dag_failing.py
+    'org_developers',
+    'default',
+    'dat_some-local-dataset',
+    'prc_developers-some-local-dataset-dummy-failing',
+    'Dummy Failing Process',
+    'Example process that always fails, to test failed jobs during local development',
+    'developers-some_local_dataset_dummy_failing',
     '{
         "type": "object",
         "properties": {

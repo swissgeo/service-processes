@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -12,6 +13,8 @@ import pytest
 from app.core import airflow
 from app.core.airflow import (
     AirflowClient,
+    AirflowDagRunResponse,
+    AirflowError,
     initialize_airflow_client,
     k8s_token_request,
     password_token_request,
@@ -85,6 +88,13 @@ async def airflow_client(fake_airflow: FakeAirflow) -> AsyncGenerator[AirflowCli
 
 def _trigger(client: AirflowClient) -> Callable:
     return lambda: client.trigger_dag_run("my_dag", "run-1", {"file": "points.csv"})
+
+
+def _cause_status(error: AirflowError) -> int:
+    """Status code of the Airflow response that caused the error."""
+    cause = error.__cause__
+    assert isinstance(cause, httpx.HTTPStatusError)
+    return cause.response.status_code
 
 
 @pytest.mark.asyncio
@@ -163,10 +173,10 @@ async def test_unauthorized_retries_once_with_new_token(
 async def test_unauthorized_twice_raises(airflow_client: AirflowClient, fake_airflow: FakeAirflow):
     fake_airflow.api_statuses = [401, 401]
 
-    with pytest.raises(httpx.HTTPStatusError) as error:
+    with pytest.raises(AirflowError) as error:
         await _trigger(airflow_client)()
 
-    assert error.value.response.status_code == 401
+    assert _cause_status(error.value) == 401
     assert len(fake_airflow.api_requests) == 2  # no endless retrying
 
 
@@ -177,10 +187,10 @@ async def test_error_response_raises_without_retry(
 ):
     fake_airflow.api_statuses = [500]
 
-    with pytest.raises(httpx.HTTPStatusError) as error:
+    with pytest.raises(AirflowError) as error:
         await _trigger(airflow_client)()
 
-    assert error.value.response.status_code == 500
+    assert _cause_status(error.value) == 500
     assert len(fake_airflow.api_requests) == 1
     assert len(fake_airflow.token_requests) == 1
 
@@ -193,12 +203,145 @@ async def test_token_request_failure_raises():
 
     client = AirflowClient(HOST, TOKEN_TTL, 10, transport=httpx.MockTransport(handler))
     try:
-        with pytest.raises(httpx.HTTPStatusError) as error:
+        with pytest.raises(AirflowError) as error:
             await _trigger(client)()
     finally:
         await client.aclose()
 
-    assert error.value.response.status_code == 403
+    assert _cause_status(error.value) == 403
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(b"{}", id="missing access_token"),
+        pytest.param(b"<html>proxy error</html>", id="not json"),
+        pytest.param(b"[]", id="json list"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unexpected_token_response_raises(content: bytes):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/auth/token"
+        return httpx.Response(201, content=content)
+
+    client = AirflowClient(HOST, TOKEN_TTL, 10, transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(AirflowError, match="Unexpected token response"):
+            await client.get_dag_run("my_dag", "run-1")
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_connection_error_raises_airflow_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = AirflowClient(HOST, TOKEN_TTL, 10, transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(AirflowError) as error:
+            await _trigger(client)()
+    finally:
+        await client.aclose()
+
+    assert isinstance(error.value.__cause__, httpx.ConnectError)
+
+
+def _dag_run_client(status: int, body: Any) -> tuple[AirflowClient, list[httpx.Request]]:
+    """Client answering Get Dag Run with the given status and (JSON or raw) body."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/auth/token":
+            return httpx.Response(201, json={"access_token": "jwt"})
+        requests.append(request)
+        if isinstance(body, bytes):
+            return httpx.Response(status, content=body)
+        return httpx.Response(status, json=body)
+
+    return AirflowClient(HOST, TOKEN_TTL, 10, transport=httpx.MockTransport(handler)), requests
+
+
+@pytest.mark.asyncio
+async def test_get_dag_run():
+    client, requests = _dag_run_client(
+        200,
+        {
+            "dag_run_id": "run-1",
+            "start_date": "2026-01-01T10:00:05Z",
+            "end_date": "2026-01-01T10:01:00Z",
+            "state": "success",
+            "conf": {},  # unknown fields are ignored
+        },
+    )
+    try:
+        dag_run = await client.get_dag_run("my_dag", "run-1")
+    finally:
+        await client.aclose()
+
+    (request,) = requests
+    assert request.method == "GET"
+    assert str(request.url) == f"{HOST}/api/v2/dags/my_dag/dagRuns/run-1"
+    assert request.headers["Authorization"] == "Bearer jwt"
+    assert dag_run == AirflowDagRunResponse(
+        start_date=datetime(2026, 1, 1, 10, 0, 5, tzinfo=UTC),
+        end_date=datetime(2026, 1, 1, 10, 1, 0, tzinfo=UTC),
+        state="success",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_dag_run_not_started():
+    # Airflow returns null dates for runs that are queued (start_date) or running (end_date)
+    client, _ = _dag_run_client(
+        200,
+        {
+            "start_date": None,
+            "end_date": None,
+            "state": "queued",
+        },
+    )
+    try:
+        dag_run = await client.get_dag_run("my_dag", "run-1")
+    finally:
+        await client.aclose()
+
+    assert dag_run.state == "queued"
+    assert dag_run.start_date is None
+    assert dag_run.end_date is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({}, id="missing state"),
+        pytest.param({"state": "running", "start_date": "not a date"}, id="invalid date"),
+        pytest.param(b"<html>proxy error</html>", id="not json"),
+        pytest.param([], id="json list"),
+        pytest.param(None, id="json null"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_dag_run_unexpected_response_raises(body: Any):
+    client, _ = _dag_run_client(200, body)
+    try:
+        with pytest.raises(AirflowError, match="Unexpected dag run response"):
+            await client.get_dag_run("my_dag", "run-1")
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_get_dag_run_not_found_raises():
+    client, _ = _dag_run_client(404, {"detail": "DagRun not found"})
+    try:
+        with pytest.raises(AirflowError) as error:
+            await client.get_dag_run("my_dag", "run-1")
+    finally:
+        await client.aclose()
+
+    assert _cause_status(error.value) == 404
 
 
 @pytest.mark.asyncio

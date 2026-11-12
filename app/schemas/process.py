@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, BeforeValidator, Field
@@ -71,12 +72,18 @@ class ProcessInput(BaseModel):
 class Job(BaseModel):
     sgid: SgidStr = Field(description="Identifier of the job")
     status: str = Field(description="Status of the job", examples=["queued"])
+    created_at: datetime = Field(description="When the Job was initialized")
+    started_at: datetime | None = Field(description="When the Job started to run")
+    finished_at: datetime | None = Field(description="When the Job completed")
 
     @classmethod
     def from_model(cls, job: models.Job) -> Self:
         return cls(
             sgid=job.sgid,
             status=job.status,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
         )
 
 
