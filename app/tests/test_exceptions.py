@@ -40,6 +40,27 @@ async def test_unified_exception_handler_validation_error():
 
 
 @pytest.mark.asyncio
+async def test_unified_exception_handler_validation_error_with_bytes_input():
+    # e.g. a non-JSON Content-Type: the raw body ends up as bytes in the error input
+    exc = RequestValidationError(
+        errors=[
+            {
+                "loc": ["body"],
+                "msg": "Input should be a valid dictionary",
+                "type": "dict_type",
+                "input": b'{"input": {"file": "test"}}',
+            }
+        ]
+    )
+
+    response = await unified_exception_handler(_make_request(), exc)
+
+    assert response.status_code == 400
+    body = json.loads(bytes(response.body))
+    assert body["detail"][0]["input"] == '{"input": {"file": "test"}}'
+
+
+@pytest.mark.asyncio
 async def test_unified_exception_handler_http_exception_string_detail():
     exc = StarletteHTTPException(status_code=404, detail="Not Found")
 

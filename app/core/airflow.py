@@ -31,7 +31,9 @@ TokenRequest = Callable[[], dict[str, Any]]
 
 def k8s_token_request() -> dict[str, Any]:
     """Exchange the Kubernetes service account token for an Airflow token (in the cluster)."""
-    return {"headers": {"Authorization": f"Bearer {_read_k8s_token()}"}}
+    # Airflow's POST /auth/token requires a JSON body (422 otherwise), even though the
+    # credentials are in the Authorization header here.
+    return {"headers": {"Authorization": f"Bearer {_read_k8s_token()}"}, "json": {}}
 
 
 def password_token_request(username: str, password: str) -> TokenRequest:
@@ -63,6 +65,12 @@ class AirflowClient:
         async with self._lock:
             if self._token is None or time.monotonic() >= self._token_expires_at:
                 response = await self._http.post("/auth/token", **self._token_request())
+                if response.is_error:
+                    logger.error(
+                        "Failed to get Airflow token: %s %s",
+                        response.status_code,
+                        response.text,
+                    )
                 response.raise_for_status()
                 self._token = AirflowAccessTokenResponse(**response.json()).access_token
                 self._token_expires_at = time.monotonic() + self._airflow_token_ttl - 60
