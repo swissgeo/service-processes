@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from datetime import datetime
 from typing import Annotated, Any
 
 import httpx
@@ -17,6 +18,13 @@ logger = logging.getLogger(__name__)
 # What we expect back from auth/token
 class AirflowAccessTokenResponse(BaseModel):
     access_token: str
+
+
+# What we expect back from Get Dag Run (only relevant fields)
+class AirflowDagRunResponse(BaseModel):
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    state: str
 
 
 def _read_k8s_token() -> str:
@@ -37,6 +45,10 @@ def k8s_token_request() -> dict[str, Any]:
 def password_token_request(username: str, password: str) -> TokenRequest:
     """Log in with username and password (simple auth manager of the local Airflow)."""
     return lambda: {"json": {"username": username, "password": password}}
+
+
+class AirflowError(Exception):
+    """A request to Airflow failed or returned an unexpected response."""
 
 
 class AirflowClient:
@@ -64,22 +76,29 @@ class AirflowClient:
             if self._token is None or time.monotonic() >= self._token_expires_at:
                 response = await self._http.post("/auth/token", **self._token_request())
                 response.raise_for_status()
-                self._token = AirflowAccessTokenResponse(**response.json()).access_token
+                try:
+                    token = AirflowAccessTokenResponse.model_validate(response.json())
+                except ValueError as error:
+                    raise AirflowError(f"Unexpected token response: {error}") from error
+                self._token = token.access_token
                 self._token_expires_at = time.monotonic() + self._airflow_token_ttl - 60
             return {"Authorization": f"Bearer {self._token}"}
 
     async def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Retry requests once with a new token if status 401 is returned."""
-        response = await self._http.request(
-            method, url, headers=await self._auth_headers(), **kwargs
-        )
-        if response.status_code == httpx.codes.UNAUTHORIZED:
-            # Retry request using a new token
-            self._token = None
+        try:
             response = await self._http.request(
                 method, url, headers=await self._auth_headers(), **kwargs
             )
-        response.raise_for_status()
+            if response.status_code == httpx.codes.UNAUTHORIZED:
+                # Retry request using a new token
+                self._token = None
+                response = await self._http.request(
+                    method, url, headers=await self._auth_headers(), **kwargs
+                )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise AirflowError(f"{method} {url} failed: {error}") from error
         return response
 
     async def trigger_dag_run(self, dag_id: str, dag_run_id: str, conf: dict[str, Any]) -> None:
@@ -90,9 +109,16 @@ class AirflowClient:
             json={"dag_run_id": dag_run_id, "conf": conf, "logical_date": None},
         )
 
-    # async def get_dag_run(self, dag_id: str, dag_run_id: str) -> Any:
-    #     """Get details of a dag run."""
-    #     return {}
+    async def get_dag_run(self, dag_id: str, dag_run_id: str) -> AirflowDagRunResponse:
+        """Get details of a dag run."""
+        response = await self._request(
+            method="GET",
+            url=f"/api/v2/dags/{dag_id}/dagRuns/{dag_run_id}",
+        )
+        try:
+            return AirflowDagRunResponse.model_validate(response.json())
+        except ValueError as error:
+            raise AirflowError(f"Unexpected dag run response: {error}") from error
 
     # async def get_dag_run_task_instances(self, dag_id: str, dag_run_id: str) -> Any:
     #     """Get details of each step of a dag run."""

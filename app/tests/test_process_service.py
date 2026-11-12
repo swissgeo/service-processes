@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import DEFAULT, AsyncMock, MagicMock
 
@@ -10,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import pytest
 
-from app.core.airflow import AirflowClient
+from app.core.airflow import AirflowClient, AirflowDagRunResponse, AirflowError
 from app.core.process_service import InvalidInputsError, ProcessService, get_process_service
-from app.models.process import JobStatus, Process
+from app.models.process import Job, JobStatus, Process
 
 DATASET = "0195f3a2-7c1e-7b3a-9d4e-000000000001"
 
@@ -263,7 +264,7 @@ async def test_execute_process_marks_job_failed_if_airflow_fails():
             _process(), {"startDate": "2026-01-01"}
         )
 
-    assert committed == [JobStatus.SUBMITTING, JobStatus.FAILED]
+    assert committed == [JobStatus.SUBMITTING, JobStatus.FAILED_SUBMIT]
 
 
 @pytest.mark.asyncio
@@ -344,3 +345,97 @@ async def test_execute_process_input_cannot_overwrite_internal_config(
     session.add.assert_not_called()
     airflow.trigger_dag_run.assert_not_awaited()
     assert process.internal_config == {"output_format": "geojson", "options": {"crs": 2056}}
+
+
+@pytest.mark.asyncio
+async def test_get_job_queries_by_sgid_with_process():
+    session = _session()
+
+    await ProcessService(session, MagicMock()).get_job("pjb_123")
+
+    statement = _compile(session.scalar.await_args.args[0])
+    assert "WHERE job.sgid = 'pjb_123'" in statement
+    # The process is needed for the authorization check and must be loaded with the job
+    assert "JOIN process" in statement
+
+
+@pytest.mark.asyncio
+async def test_get_job_returns_job():
+    job = Job(sgid="pjb_123")
+    session = _session()
+    session.scalar.return_value = job
+
+    result = await ProcessService(session, MagicMock()).get_job("pjb_123")
+
+    assert result is job
+
+
+@pytest.mark.asyncio
+async def test_get_job_returns_none_when_not_found():
+    session = _session()
+    session.scalar.return_value = None
+
+    result = await ProcessService(session, MagicMock()).get_job("pjb_123")
+
+    assert result is None
+
+
+def _job(status: JobStatus) -> Job:
+    return Job(sgid="pjb_123", dag_run_id="run-1", status=status, process=_process())
+
+
+@pytest.mark.parametrize(
+    "status",
+    [JobStatus.SUBMITTING, JobStatus.FAILED_SUBMIT, JobStatus.SUCCESS, JobStatus.FAILED],
+)
+@pytest.mark.asyncio
+async def test_get_updated_job_skips_airflow(status: JobStatus):
+    session = _session()
+    airflow = AsyncMock(spec=AirflowClient)
+    job = _job(status)
+
+    result = await ProcessService(session, airflow).get_updated_job(job)
+
+    assert result is job
+    assert job.status == status
+    airflow.get_dag_run.assert_not_awaited()
+    session.on_commit.assert_not_called()
+
+
+@pytest.mark.parametrize("status", [JobStatus.QUEUED, JobStatus.RUNNING])
+@pytest.mark.asyncio
+async def test_get_updated_job_updates_status_from_dag_run(status: JobStatus):
+    session = _session()
+    committed: list[str] = []
+    job = _job(status)
+    session.on_commit.side_effect = lambda: committed.append(job.status)
+    airflow = AsyncMock(spec=AirflowClient)
+    started_at = datetime(2026, 1, 1, 10, 0, 5, tzinfo=UTC)
+    finished_at = datetime(2026, 1, 1, 10, 1, 0, tzinfo=UTC)
+    airflow.get_dag_run.return_value = AirflowDagRunResponse(
+        state="success", start_date=started_at, end_date=finished_at
+    )
+
+    result = await ProcessService(session, airflow).get_updated_job(job)
+
+    assert result is job
+    assert job.status == JobStatus.SUCCESS
+    assert job.started_at == started_at
+    assert job.finished_at == finished_at
+    assert committed == [JobStatus.SUCCESS]
+    airflow.get_dag_run.assert_awaited_once_with("dummy_dag", "run-1")
+
+
+@pytest.mark.asyncio
+async def test_get_updated_job_keeps_status_if_airflow_fails(caplog: pytest.LogCaptureFixture):
+    session = _session()
+    airflow = AsyncMock(spec=AirflowClient)
+    airflow.get_dag_run.side_effect = AirflowError("airflow down")
+    job = _job(JobStatus.RUNNING)
+
+    result = await ProcessService(session, airflow).get_updated_job(job)
+
+    assert result is job
+    assert job.status == JobStatus.RUNNING
+    session.on_commit.assert_not_called()
+    assert "Could not refresh job pjb_123 from Airflow" in caplog.text

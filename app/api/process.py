@@ -3,7 +3,12 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 
-from app.core.authorization import Action, AuthorizationDep, dataset_resource, process_resource
+from app.core.authorization import (
+    Action,
+    AuthorizationDep,
+    dataset_resource,
+    process_resource,
+)
 from app.core.process_service import InvalidInputsError, ProcessServiceDep
 from app.schemas.process import (
     JobResponse,
@@ -74,4 +79,20 @@ async def execute_process(
     except InvalidInputsError as error:
         # Same response (400) as for other invalid request payloads
         raise RequestValidationError(error.errors) from None
+    return JobResponse.from_model(job)
+
+
+@router.get("/jobs/{sgid}", summary="Get job details")
+async def get_job(
+    sgid: SgidStr,
+    service: ProcessServiceDep,
+    authorization: AuthorizationDep,
+) -> JobResponse:
+    """Get job details by sgid"""
+    job = await service.get_job(sgid)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await authorization.require(Action.GET_PROCESS, process_resource(job.process))
+
+    job = await service.get_updated_job(job)
     return JobResponse.from_model(job)
