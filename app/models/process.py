@@ -69,6 +69,7 @@ class Process(Base):
 class JobStatus(StrEnum):
     """Status of a job, stored as string."""
 
+<<<<<<< HEAD
     # service-processes internal status options
     SUBMITTING = "submitting"  # Job inserted, DAG run not (yet) triggered in Airflow
     FAILED_SUBMIT = "failed_submit"  # Triggering the DAG run failed
@@ -78,6 +79,17 @@ class JobStatus(StrEnum):
     RUNNING = "running"  # DAG running
     SUCCESS = "success"  # DAG run completed successfully
     FAILED = "failed"  # DAG run failed
+=======
+    # TODO: This might change once the get Job endpoints are implemented and we align with the
+    # airflow status options.
+
+    # Job inserted, DAG run not (yet) triggered successfully in Airflow
+    SUBMITTING = "submitting"
+    # DAG run triggered in Airflow
+    QUEUED = "queued"
+    # Triggering the DAG run failed
+    FAILED = "failed"
+>>>>>>> 9e5f173 (GPS-1011: Local airflow)
 
 
 class Job(Base):
