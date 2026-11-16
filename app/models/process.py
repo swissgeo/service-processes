@@ -67,7 +67,19 @@ class Process(Base):
 
 
 class JobStatus(StrEnum):
-    """Status of a job, stored as string."""
+    """Status of a job, stored as string.
+
+    Possible status transitions:
+
+    Happy path:
+        SUBMITTING -> QUEUED -> RUNNING -> SUCCESS
+
+    Other paths:
+        SUBMITTING -> FAILED_SUBMIT
+        SUBMITTING -> QUEUED -> RUNNING -> FAILED
+
+    SUCCESS, FAILED and FAILED_SUBMIT are final states.
+    """
 
     # service-processes internal status options
     SUBMITTING = "submitting"  # Job inserted, DAG run not (yet) triggered in Airflow
@@ -81,7 +93,15 @@ class JobStatus(StrEnum):
 
 
 class Job(Base):
-    """A process run instance, backed by an airflow dag run."""
+    """A process run instance, backed by an airflow dag run.
+
+    The `created_at` timestamp is set only in the database when the job is created (independet of
+    airflow). Until the dag run is actually created in airflow, the job has status SUBMITTING and
+    the timestamps `started_at` `finished_at` are null. Once airflow has the dag run created (even
+    if not yet running), the status is updated to QUEUED. Only once airflow starts running the dag
+    run the status is updated to RUNNING and the `started_at` is set. `finished_at` is set once the
+    dag run is completed (either SUCCESS or FAILED).
+    """
 
     __tablename__ = "job"
     # When you access a database-generated field like sgid or timestamps that is not yet loaded in
