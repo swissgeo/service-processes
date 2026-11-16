@@ -61,7 +61,7 @@ async def get_process(
     return ProcessResponse.from_model(process)
 
 
-@router.post("/processes/{sgid}/execute", summary="Start a process")
+@router.post("/processes/{sgid}/execution", summary="Start a process")
 async def execute_process(
     sgid: SgidStr,
     body: ProcessInput,

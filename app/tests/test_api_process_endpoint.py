@@ -376,7 +376,7 @@ def test_execute_process(client: TestClient, process_service: AsyncMock, authori
     )
 
     response = client.post(
-        f"/processes/{PROCESS.sgid}/execute",
+        f"/processes/{PROCESS.sgid}/execution",
         json={"inputs": {"startDate": "2026-01-01"}},
         headers=AUTH_HEADERS,
     )
@@ -402,7 +402,7 @@ def test_execute_process_forbidden(
     authorizer.is_authorized.return_value = False
 
     response = client.post(
-        f"/processes/{PROCESS.sgid}/execute", json={"inputs": {}}, headers=AUTH_HEADERS
+        f"/processes/{PROCESS.sgid}/execution", json={"inputs": {}}, headers=AUTH_HEADERS
     )
 
     assert response.status_code == 403
@@ -430,7 +430,7 @@ def test_execute_process_invalid_inputs(client: TestClient, process_service: Asy
     process_service.execute_process.side_effect = InvalidInputsError(errors)
 
     response = client.post(
-        f"/processes/{PROCESS.sgid}/execute",
+        f"/processes/{PROCESS.sgid}/execution",
         json={"inputs": {"startDate": 1}},
         headers=AUTH_HEADERS,
     )
