@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 class Action(StrEnum):
     """Actions defined in the policy store schema."""
 
+    # GET_PROCESS also allows to view jobs of a process.
     GET_PROCESS = "getProcess"
     LIST_PROCESSES = "listProcesses"
     EXECUTE_PROCESS = "executeProcess"
