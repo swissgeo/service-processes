@@ -94,15 +94,21 @@ async def list_jobs(
     """List the jobs of the given processes and/or datasets the user may access, newest first,
     paginated. At least one of `processes` or `datasets` is required, all filters must match.
     """
+    # Get filtered by process and dataset query params
     processes = await service.get_processes(params.processes, params.datasets)
-    allowed = {
+    # Check which of the processes the user is allowed to access
+    allowed_processes = {
         resource.id
         for resource in await authorization.filter(
             Action.GET_PROCESS, [process_resource(p) for p in processes]
         )
     }
+    # list job filtered by processes user us allowed to access and status
     jobs, total = await service.list_jobs(
-        [p.id for p in processes if p.sgid in allowed], params.status, params.limit, params.offset
+        [p.id for p in processes if p.sgid in allowed_processes],
+        params.status,
+        params.limit,
+        params.offset,
     )
     return ListJobsResponse(
         items=[Job.from_model(job) for job in jobs],
