@@ -12,6 +12,9 @@ from app.schemas.pagination import PaginatedResponse, PaginationParams
 # SGIDs are arbitrary strings (not necessarily UUIDs), limited to the length of the DB columns.
 SgidStr = Annotated[str, Field(min_length=1, max_length=SGID_MAX_LENGTH)]
 
+# Length of the job.idempotency_key DB column
+IDEMPOTENCY_KEY_MAX_LENGTH = 128
+
 # To limit the size of SQL IN-filters and the number of authorization calls
 MAX_FILTER_VALUES = 30
 

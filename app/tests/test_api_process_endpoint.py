@@ -16,10 +16,15 @@ from app.core.authorization import (
     get_authorizer,
     process_resource,
 )
-from app.core.process_service import InvalidInputsError, ProcessService, get_process_service
+from app.core.process_service import (
+    IdempotencyKeyReusedError,
+    InvalidInputsError,
+    ProcessService,
+    get_process_service,
+)
 from app.models.process import SGID_MAX_LENGTH, Job, JobStatus, Process
 from app.schemas.pagination import DEFAULT_LIMIT, MAX_LIMIT
-from app.schemas.process import MAX_FILTER_VALUES
+from app.schemas.process import IDEMPOTENCY_KEY_MAX_LENGTH, MAX_FILTER_VALUES
 
 TOKEN = "header.payload.signature"  # noqa: S105
 AUTH_HEADERS = {"X-Auth-Request-Access-Token": TOKEN}
@@ -376,35 +381,117 @@ class TestGetProcess:
         authorizer.is_authorized.assert_not_awaited()
 
 
+IDEMPOTENCY_KEY = "0195f3a2-7c1e-7b3a-9d4e-00000000000a"
+EXECUTION_HEADERS = {**AUTH_HEADERS, "Idempotency-Key": IDEMPOTENCY_KEY}
+EXECUTED_JOB = Job(sgid="pjb_123", status="queued", created_at=CREATED_AT, process=PROCESS)
+EXECUTED_JOB_JSON = {
+    "sgid": "pjb_123",
+    "process_sgid": PROCESS.sgid,
+    "status": "queued",
+    "created_at": "2026-01-01T10:00:00Z",
+    "started_at": None,
+    "finished_at": None,
+}
+
+
 class TestProcessExecution:
     def test_execute_process(
         self, client: TestClient, process_service: AsyncMock, authorizer: AsyncMock
     ):
         process_service.get_process.return_value = PROCESS
-        process_service.execute_process.return_value = Job(
-            sgid="pjb_123", status="queued", created_at=CREATED_AT, process=PROCESS
-        )
+        process_service.execute_process.return_value = (EXECUTED_JOB, True)
 
         response = client.post(
             f"/processes/{PROCESS.sgid}/execution",
             json={"inputs": {"startDate": "2026-01-01"}},
-            headers=AUTH_HEADERS,
+            headers=EXECUTION_HEADERS,
         )
 
-        assert response.status_code == 200
-        assert response.json() == {
-            "sgid": "pjb_123",
-            "process_sgid": PROCESS.sgid,
-            "status": "queued",
-            "created_at": "2026-01-01T10:00:00Z",
-            "started_at": None,
-            "finished_at": None,
-        }
+        assert response.status_code == 201
+        assert response.json() == EXECUTED_JOB_JSON
         authorizer.is_authorized.assert_awaited_once_with(
             TOKEN, Action.EXECUTE_PROCESS, process_resource(PROCESS)
         )
         process_service.execute_process.assert_awaited_once_with(
-            PROCESS, {"startDate": "2026-01-01"}
+            PROCESS, {"startDate": "2026-01-01"}, IDEMPOTENCY_KEY
+        )
+
+    @pytest.mark.usefixtures("authorizer")
+    def test_execute_process_returns_existing_job_for_same_key(
+        self, client: TestClient, process_service: AsyncMock
+    ):
+        process_service.get_process.return_value = PROCESS
+        process_service.execute_process.return_value = (EXECUTED_JOB, False)
+
+        response = client.post(
+            f"/processes/{PROCESS.sgid}/execution",
+            json={"inputs": {"startDate": "2026-01-01"}},
+            headers=EXECUTION_HEADERS,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == EXECUTED_JOB_JSON
+
+    @pytest.mark.usefixtures("authorizer")
+    def test_execute_process_same_key_with_other_inputs(
+        self, client: TestClient, process_service: AsyncMock
+    ):
+        process_service.get_process.return_value = PROCESS
+        process_service.execute_process.side_effect = IdempotencyKeyReusedError
+
+        response = client.post(
+            f"/processes/{PROCESS.sgid}/execution",
+            json={"inputs": {"startDate": "2026-01-01"}},
+            headers=EXECUTION_HEADERS,
+        )
+
+        assert response.status_code == 409
+        assert response.json() == {
+            "error": "Conflict",
+            "message": "Idempotency-Key was already used with a different request body",
+        }
+
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            pytest.param(AUTH_HEADERS, id="missing"),
+            pytest.param({**AUTH_HEADERS, "Idempotency-Key": ""}, id="empty"),
+            pytest.param(
+                {**AUTH_HEADERS, "Idempotency-Key": "a" * (IDEMPOTENCY_KEY_MAX_LENGTH + 1)},
+                id="too-long",
+            ),
+        ],
+    )
+    def test_execute_process_invalid_idempotency_key(
+        self, client: TestClient, process_service: AsyncMock, headers: dict[str, str]
+    ):
+        response = client.post(
+            f"/processes/{PROCESS.sgid}/execution",
+            json={"inputs": {"startDate": "2026-01-01"}},
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"][0]["loc"] == ["header", "idempotency-key"]
+        process_service.execute_process.assert_not_awaited()
+
+    @pytest.mark.usefixtures("authorizer")
+    def test_execute_process_accepts_idempotency_key_of_max_length(
+        self, client: TestClient, process_service: AsyncMock
+    ):
+        process_service.get_process.return_value = PROCESS
+        process_service.execute_process.return_value = (EXECUTED_JOB, True)
+        key = "a" * IDEMPOTENCY_KEY_MAX_LENGTH
+
+        response = client.post(
+            f"/processes/{PROCESS.sgid}/execution",
+            json={"inputs": {"startDate": "2026-01-01"}},
+            headers={**AUTH_HEADERS, "Idempotency-Key": key},
+        )
+
+        assert response.status_code == 201
+        process_service.execute_process.assert_awaited_once_with(
+            PROCESS, {"startDate": "2026-01-01"}, key
         )
 
     def test_execute_process_forbidden(
@@ -414,7 +501,7 @@ class TestProcessExecution:
         authorizer.is_authorized.return_value = False
 
         response = client.post(
-            f"/processes/{PROCESS.sgid}/execution", json={"inputs": {}}, headers=AUTH_HEADERS
+            f"/processes/{PROCESS.sgid}/execution", json={"inputs": {}}, headers=EXECUTION_HEADERS
         )
 
         assert response.status_code == 403
@@ -425,10 +512,11 @@ class TestProcessExecution:
         process_service.get_process.return_value = None
 
         response = client.post(
-            f"/processes/{uuid.uuid7()}/execution", json={"inputs": {}}, headers=AUTH_HEADERS
+            f"/processes/{uuid.uuid7()}/execution", json={"inputs": {}}, headers=EXECUTION_HEADERS
         )
 
         assert response.status_code == 404
+        assert response.json() == {"error": "Not Found", "message": "Process not found"}
         process_service.execute_process.assert_not_awaited()
 
     @pytest.mark.usefixtures("authorizer")
@@ -446,7 +534,7 @@ class TestProcessExecution:
         response = client.post(
             f"/processes/{PROCESS.sgid}/execution",
             json={"inputs": {"startDate": 1}},
-            headers=AUTH_HEADERS,
+            headers=EXECUTION_HEADERS,
         )
 
         assert response.status_code == 400

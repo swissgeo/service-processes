@@ -7,12 +7,19 @@ from unittest.mock import DEFAULT, AsyncMock, MagicMock
 
 from sqlalchemy import ClauseElement
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pytest
 
 from app.core.airflow import AirflowClient, AirflowDagRunResponse, AirflowError
-from app.core.process_service import InvalidInputsError, ProcessService, get_process_service
+from app.core.process_service import (
+    IdempotencyKeyReusedError,
+    InvalidInputsError,
+    ProcessService,
+    _hash_inputs,
+    get_process_service,
+)
 from app.models.process import Job, JobStatus, Process
 
 DATASET = "0195f3a2-7c1e-7b3a-9d4e-000000000001"
@@ -77,12 +84,44 @@ def _process() -> Process:
     )
 
 
+KEY = "0195f3a2-7c1e-7b3a-9d4e-00000000000a"
+INPUTS = {"startDate": "2026-01-01"}
+
+
 def _mock_job_session() -> tuple[AsyncMock, list[str]]:
-    """Session mock recording the status of the added job at each commit."""
+    """Session mock without existing job for the key, recording the status of the added job at
+    each commit after it was added."""
     session = _session()
+    session.scalar.return_value = None
     committed: list[str] = []
-    session.on_commit.side_effect = lambda: committed.append(session.add.call_args.args[0].status)
+
+    def on_commit() -> None:
+        if session.add.called:
+            committed.append(session.add.call_args.args[0].status)
+
+    session.on_commit.side_effect = on_commit
     return session, committed
+
+
+def _existing_job(inputs: dict[str, Any]) -> Job:
+    return Job(
+        sgid="pjb_existing",
+        dag_run_id="run-existing",
+        idempotency_key=KEY,
+        request_hash=_hash_inputs(inputs),
+        status=JobStatus.SUBMITTING,
+        process=_process(),
+    )
+
+
+def _insert_race_session(existing: Job | None) -> AsyncMock:
+    """Session mock where a concurrent request inserts its job between the lookup and the insert,
+    and existing is what the second lookup returns."""
+    session = _session()
+    lookups = iter([None, existing])
+    session.scalar.side_effect = lambda *_args: next(lookups)
+    session.add.side_effect = IntegrityError("INSERT", {}, Exception("duplicate key"))
+    return session
 
 
 def _job(status: JobStatus) -> Job:
@@ -266,13 +305,14 @@ class TestExecuteProcess:
 
         airflow.trigger_dag_run.side_effect = trigger_dag_run
 
-        job = await ProcessService(session, airflow).execute_process(
-            process, {"startDate": "2026-01-01"}
-        )
+        job, created = await ProcessService(session, airflow).execute_process(process, INPUTS, KEY)
 
+        assert created is True
         session.add.assert_called_once_with(job)
         assert job.process_id == 1
         assert job.status == JobStatus.QUEUED
+        assert job.idempotency_key == KEY
+        assert job.request_hash == _hash_inputs(INPUTS)
         assert committed == [JobStatus.SUBMITTING, JobStatus.QUEUED]
         airflow.trigger_dag_run.assert_awaited_once_with(
             "dummy_dag",
@@ -292,11 +332,139 @@ class TestExecuteProcess:
         airflow.trigger_dag_run.side_effect = RuntimeError("airflow down")
 
         with pytest.raises(RuntimeError):
-            await ProcessService(session, airflow).execute_process(
-                _process(), {"startDate": "2026-01-01"}
-            )
+            await ProcessService(session, airflow).execute_process(_process(), INPUTS, KEY)
 
         assert committed == [JobStatus.SUBMITTING, JobStatus.FAILED_SUBMIT]
+
+    @pytest.mark.asyncio
+    async def test_execute_process_queries_job_by_process_and_key(self):
+        session, _committed = _mock_job_session()
+
+        await ProcessService(session, AsyncMock(spec=AirflowClient)).execute_process(
+            _process(), INPUTS, KEY
+        )
+
+        statement = _compile(session.scalar.await_args_list[0].args[0])
+        assert f"WHERE job.process_id = 1 AND job.idempotency_key = '{KEY}'" in statement
+        # The response includes the process sgid
+        assert "JOIN process" in statement
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status", [JobStatus.SUBMITTING, JobStatus.FAILED_SUBMIT, JobStatus.SUCCESS]
+    )
+    async def test_execute_process_returns_existing_job_for_same_key(self, status: JobStatus):
+        existing = _existing_job(INPUTS)
+        existing.status = status
+        session = _session()
+        session.scalar.return_value = existing
+        airflow = AsyncMock(spec=AirflowClient)
+
+        # Same inputs with the keys in another order
+        job, created = await ProcessService(session, airflow).execute_process(
+            _process(), dict(reversed(INPUTS.items())), KEY
+        )
+
+        assert job is existing
+        assert created is False
+        assert job.status == status  # no state is retried, whatever the status
+        session.add.assert_not_called()
+        airflow.trigger_dag_run.assert_not_awaited()
+        airflow.get_dag_run.assert_not_awaited()  # not active, nothing to refresh
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("race", [False, True])
+    async def test_execute_process_refreshes_existing_active_job(self, race: bool):
+        existing = _existing_job(INPUTS)
+        existing.status = JobStatus.QUEUED
+        if race:
+            session = _insert_race_session(existing)
+        else:
+            session = _session()
+            session.scalar.return_value = existing
+        airflow = AsyncMock(spec=AirflowClient)
+        airflow.get_dag_run.return_value = AirflowDagRunResponse(
+            state="running", start_date=datetime(2026, 1, 1, 10, 0, 5, tzinfo=UTC), end_date=None
+        )
+
+        job, created = await ProcessService(session, airflow).execute_process(
+            _process(), INPUTS, KEY
+        )
+
+        assert job is existing
+        assert created is False
+        assert job.status == JobStatus.RUNNING
+        airflow.get_dag_run.assert_awaited_once_with("dummy_dag", "run-existing")
+        airflow.trigger_dag_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_process_returns_existing_job_if_process_config_changed(self):
+        # The mapping was changed after the first request, so the conf can't be built anymore
+        process = _process()
+        process.parameter_mapping = {"startDate": "options.crs"}
+        session = _session()
+        session.scalar.return_value = _existing_job(INPUTS)
+        airflow = AsyncMock(spec=AirflowClient)
+
+        job, created = await ProcessService(session, airflow).execute_process(process, INPUTS, KEY)
+
+        assert job.sgid == "pjb_existing"
+        assert created is False
+        airflow.trigger_dag_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_process_rejects_same_key_with_other_inputs(self):
+        session = _session()
+        session.scalar.return_value = _existing_job({"startDate": "2025-12-31"})
+        airflow = AsyncMock(spec=AirflowClient)
+
+        with pytest.raises(IdempotencyKeyReusedError):
+            await ProcessService(session, airflow).execute_process(_process(), INPUTS, KEY)
+
+        session.add.assert_not_called()
+        airflow.trigger_dag_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_process_returns_job_of_concurrent_request_with_same_key(self):
+        existing = _existing_job(INPUTS)
+        session = _insert_race_session(existing)
+        airflow = AsyncMock(spec=AirflowClient)
+
+        job, created = await ProcessService(session, airflow).execute_process(
+            _process(), INPUTS, KEY
+        )
+
+        assert job is existing
+        assert created is False
+        airflow.trigger_dag_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_process_rejects_concurrent_request_with_same_key_and_other_inputs(
+        self,
+    ):
+        session = _insert_race_session(_existing_job({"startDate": "2025-12-31"}))
+        airflow = AsyncMock(spec=AirflowClient)
+
+        with pytest.raises(IdempotencyKeyReusedError):
+            await ProcessService(session, airflow).execute_process(_process(), INPUTS, KEY)
+
+        airflow.trigger_dag_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_process_reraises_other_integrity_errors(self):
+        session = _insert_race_session(None)  # no job with the key, another constraint failed
+        airflow = AsyncMock(spec=AirflowClient)
+
+        with pytest.raises(IntegrityError):
+            await ProcessService(session, airflow).execute_process(_process(), INPUTS, KEY)
+
+        airflow.trigger_dag_run.assert_not_awaited()
+
+    def test_hash_inputs_ignores_key_order(self):
+        assert _hash_inputs({"a": 1, "b": {"c": 2, "d": 3}}) == _hash_inputs(
+            {"b": {"d": 3, "c": 2}, "a": 1}
+        )
+        assert _hash_inputs({"a": 1}) != _hash_inputs({"a": 2})
 
     @pytest.mark.asyncio
     async def test_execute_process_invalid_inputs(self):
@@ -304,7 +472,9 @@ class TestExecuteProcess:
         airflow = AsyncMock(spec=AirflowClient)
 
         with pytest.raises(InvalidInputsError) as error:
-            await ProcessService(session, airflow).execute_process(_process(), {"startDate": 1})
+            await ProcessService(session, airflow).execute_process(
+                _process(), {"startDate": 1}, KEY
+            )
 
         assert error.value.errors == [
             {
@@ -324,7 +494,7 @@ class TestExecuteProcess:
 
         with pytest.raises(InvalidInputsError) as error:
             await ProcessService(session, airflow).execute_process(
-                _process(), {"startDate": "2026-01-01", "foo": 1}
+                _process(), {"startDate": "2026-01-01", "foo": 1}, KEY
             )
 
         assert error.value.errors == [
@@ -342,12 +512,12 @@ class TestExecuteProcess:
         # Misconfigured process: schema property without parameter mapping
         process = _process()
         process.user_parameter_schema["properties"]["endDate"] = {"type": "string"}
-        session = _session()
+        session, _committed = _mock_job_session()
         airflow = AsyncMock(spec=AirflowClient)
 
         with pytest.raises(ValueError, match="No parameter mapping for input 'endDate'"):
             await ProcessService(session, airflow).execute_process(
-                process, {"startDate": "2026-01-01", "endDate": "2026-01-31"}
+                process, {"startDate": "2026-01-01", "endDate": "2026-01-31"}, KEY
             )
 
         session.add.assert_not_called()
@@ -383,13 +553,11 @@ class TestExecuteProcess:
         # Misconfigured process: mapping targets a path already set by internal_config
         process = _process()
         process.parameter_mapping = {"startDate": path}
-        session = _session()
+        session, _committed = _mock_job_session()
         airflow = AsyncMock(spec=AirflowClient)
 
         with pytest.raises(error, match=match):
-            await ProcessService(session, airflow).execute_process(
-                process, {"startDate": "2026-01-01"}
-            )
+            await ProcessService(session, airflow).execute_process(process, INPUTS, KEY)
 
         session.add.assert_not_called()
         airflow.trigger_dag_run.assert_not_awaited()
