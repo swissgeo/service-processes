@@ -3,6 +3,7 @@ from http import HTTPStatus
 from starlette.exceptions import HTTPException
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -25,7 +26,9 @@ async def validation_exception_handler(
         content=ErrorResponse(
             error="Validation Error",
             message="Invalid request payload",
-            detail=exc.errors() or None,
+            # jsonable_encoder is needed since errors may contain non JSON
+            # serializable values (e.g. raw bytes body when Content-Type is not JSON)
+            detail=jsonable_encoder(exc.errors()) or None,
         ).model_dump(exclude_none=True),
     )
 
