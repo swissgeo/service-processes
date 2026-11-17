@@ -15,17 +15,17 @@ def test_pagination_params_defaults():
 @pytest.mark.parametrize(
     ("limit", "expected"),
     [
-        (1, 1),
-        (20, 20),
-        (MAX_LIMIT, MAX_LIMIT),
-        ("20", 20),
-        (MAX_LIMIT + 1, MAX_LIMIT),
-        (1000, MAX_LIMIT),
-        (0, 1),
-        (-5, 1),
-        ("abc", DEFAULT_LIMIT),
-        ("", DEFAULT_LIMIT),
-        (1.5, DEFAULT_LIMIT),
+        pytest.param(1, 1, id="min"),
+        pytest.param(20, 20, id="valid"),
+        pytest.param(MAX_LIMIT, MAX_LIMIT, id="max"),
+        pytest.param("20", 20, id="numeric string"),
+        pytest.param(MAX_LIMIT + 1, MAX_LIMIT, id="above max"),
+        pytest.param(1000, MAX_LIMIT, id="far above max"),
+        pytest.param(0, 1, id="zero"),
+        pytest.param(-5, 1, id="negative"),
+        pytest.param("abc", DEFAULT_LIMIT, id="not numeric"),
+        pytest.param("", DEFAULT_LIMIT, id="empty string"),
+        pytest.param(1.5, DEFAULT_LIMIT, id="float"),
     ],
 )
 def test_pagination_params_clamps_limit(limit: Any, expected: int):
@@ -35,12 +35,12 @@ def test_pagination_params_clamps_limit(limit: Any, expected: int):
 @pytest.mark.parametrize(
     ("offset", "expected"),
     [
-        (0, 0),
-        (40, 40),
-        ("40", 40),
-        (-1, 0),
-        ("abc", 0),
-        ("", 0),
+        pytest.param(0, 0, id="zero"),
+        pytest.param(40, 40, id="valid"),
+        pytest.param("40", 40, id="numeric string"),
+        pytest.param(-1, 0, id="negative"),
+        pytest.param("abc", 0, id="not numeric"),
+        pytest.param("", 0, id="empty string"),
     ],
 )
 def test_pagination_params_clamps_offset(offset: Any, expected: int):

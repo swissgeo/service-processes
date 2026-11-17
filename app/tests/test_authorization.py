@@ -119,10 +119,16 @@ async def test_is_authorized_sends_token_action_and_entities(
 @pytest.mark.parametrize(
     "response",
     [
-        decision("DENY"),
-        decision("DENY", [{"errorDescription": "policy evaluation failed"}]),
+        pytest.param(decision("DENY"), id="deny"),
+        pytest.param(
+            decision("DENY", [{"errorDescription": "policy evaluation failed"}]),
+            id="deny with errors",
+        ),
         # An erroring forbid policy is skipped by Cedar, so ALLOW with errors must be denied
-        decision("ALLOW", [{"errorDescription": "policy evaluation failed"}]),
+        pytest.param(
+            decision("ALLOW", [{"errorDescription": "policy evaluation failed"}]),
+            id="allow with errors",
+        ),
     ],
 )
 async def test_is_authorized_denied(
@@ -135,7 +141,12 @@ async def test_is_authorized_denied(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "error_code", ["ValidationException", "AccessDeniedException", "ThrottlingException"]
+    "error_code",
+    [
+        pytest.param("ValidationException", id="validation"),
+        pytest.param("AccessDeniedException", id="access denied"),
+        pytest.param("ThrottlingException", id="throttling"),
+    ],
 )
 async def test_is_authorized_raises_on_client_error(
     stubber: Stubber, authorizer: VerifiedPermissionsAuthorizer, error_code: str
@@ -268,8 +279,10 @@ async def test_batch_is_authorized_raises_on_client_error(
 @pytest.mark.parametrize(
     ("result", "expected_status"),
     [
-        ({"return_value": False}, 403),
-        ({"side_effect": AuthorizationError("unavailable")}, 503),
+        pytest.param({"return_value": False}, 403, id="denied"),
+        pytest.param(
+            {"side_effect": AuthorizationError("unavailable")}, 503, id="authorizer unavailable"
+        ),
     ],
 )
 async def test_require_rejects(result: dict, expected_status: int):

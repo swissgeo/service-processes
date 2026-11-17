@@ -1,13 +1,26 @@
 from datetime import datetime
-from enum import StrEnum
+from enum import StrEnum, auto
 from types import MappingProxyType
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    desc,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+SGID_MAX_LENGTH = 128
 
 
 class Process(Base):
@@ -37,13 +50,16 @@ class Process(Base):
     # Returned in api responses. Any string up to 128 characters, defaults to a TypeID with the
     # prefix "prc" (e.g. prc_01h455vb4pex5vsknk084sn02q) if not set.
     sgid: Mapped[str] = mapped_column(
-        String(128), unique=True, server_default=text("typeid_generate('prc')")
+        String(SGID_MAX_LENGTH), unique=True, server_default=text("typeid_generate('prc')")
     )
     # Organization, unit and dataset live outside this
     # service and will be used for authorization checks.
-    organization_sgid: Mapped[str] = mapped_column(String(128))
-    organization_unit_sgid: Mapped[str] = mapped_column(String(128))
-    dataset_sgid: Mapped[str] = mapped_column(String(128), index=True)  # used for lookups
+    organization_sgid: Mapped[str] = mapped_column(String(SGID_MAX_LENGTH))
+    organization_unit_sgid: Mapped[str] = mapped_column(String(SGID_MAX_LENGTH))
+    dataset_sgid: Mapped[str] = mapped_column(
+        String(SGID_MAX_LENGTH),
+        index=True,  # used for lookups
+    )
 
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(Text)
@@ -82,20 +98,26 @@ class JobStatus(StrEnum):
     """
 
     # service-processes internal status options
-    SUBMITTING = "submitting"  # Job inserted, DAG run not (yet) triggered in Airflow
-    FAILED_SUBMIT = "failed_submit"  # Triggering the DAG run failed
+    SUBMITTING = auto()  # Job inserted, DAG run not (yet) triggered in Airflow
+    FAILED_SUBMIT = auto()  # Triggering the DAG run failed
 
-    # Airflow Dag run status options
+    # Airflow Dag run status options (must match the airflow states)
     QUEUED = "queued"  # DAG run triggered
     RUNNING = "running"  # DAG running
     SUCCESS = "success"  # DAG run completed successfully
     FAILED = "failed"  # DAG run failed
 
 
+# Statuses of jobs whose dag run can still change in Airflow. Not included: SUBMITTING and
+# FAILED_SUBMIT (the dag run doesn't (yet) exist), SUCCESS and FAILED (the dag run finished).
+# Changing this requires a migration to recreate the ix_job_active_process_id partial index.
+ACTIVE_STATUSES = (JobStatus.QUEUED, JobStatus.RUNNING)
+
+
 class Job(Base):
     """A process run instance, backed by an airflow dag run.
 
-    The `created_at` timestamp is set only in the database when the job is created (independet of
+    The `created_at` timestamp is set only in the database when the job is created (independent of
     airflow). Until the dag run is actually created in airflow, the job has status SUBMITTING and
     the timestamps `started_at` `finished_at` are null. Once airflow has the dag run created (even
     if not yet running), the status is updated to QUEUED. Only once airflow starts running the dag
@@ -104,6 +126,19 @@ class Job(Base):
     """
 
     __tablename__ = "job"
+    # Jobs are listed per process, newest first (see ProcessService.list_jobs)
+    __table_args__ = (
+        Index("ix_job_process_id_created_at", "process_id", desc("created_at"), desc("id")),
+        # We expect many jobs but not many active jobs compared to finished ones. When listing
+        # jobs we refresh all the active ones. This index should improve selecting them.
+        Index(
+            "ix_job_active_process_id",
+            "process_id",
+            postgresql_where=text(
+                f"status IN ({', '.join(f"'{status}'" for status in ACTIVE_STATUSES)})"
+            ),
+        ),
+    )
     # When you access a database-generated field like sgid or timestamps that is not yet loaded in
     # the Python object, SQLAlchemy fires an extra hidden query to fetch its value ("lazy load").
     # With async SQLAlchemy that hidden query would crash, so we configure SQLAlchemy to fetch the
@@ -121,9 +156,9 @@ class Job(Base):
     # Returned in api responses. Any string up to 128 characters, defaults to a TypeID with the
     # prefix "pjb" (e.g. pjb_01h455vb4pex5vsknk084sn02q) if not set.
     sgid: Mapped[str] = mapped_column(
-        String(128), unique=True, server_default=text("typeid_generate('pjb')")
+        String(SGID_MAX_LENGTH), unique=True, server_default=text("typeid_generate('pjb')")
     )
-    process_id: Mapped[int] = mapped_column(ForeignKey("process.id"), index=True)
+    process_id: Mapped[int] = mapped_column(ForeignKey("process.id"))
     # lazy="raise": async sessions can't lazy-load, so fail loudly if a query forgot to load it
     process: Mapped[Process] = relationship(lazy="raise")
 

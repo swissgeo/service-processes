@@ -54,7 +54,12 @@ class AirflowError(Exception):
 
 
 class AirflowClient:
-    """Airflow client"""
+    """Airflow client.
+
+    Use http requests over the [python airflow library](https://github.com/apache/airflow-client-python)
+    as it does not support async out of the box. As there are not that many requests this seems like
+    the better option.
+    """
 
     def __init__(
         self,
