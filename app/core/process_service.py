@@ -27,6 +27,18 @@ logger = logging.getLogger(__name__)
 MAX_CONCURRENT_AIRFLOW_REQUESTS = 10
 
 
+class InvalidInputsError(Exception):
+    """The user inputs don't match the JSON schema of the process."""
+
+    def __init__(self, errors: list[dict[str, Any]]) -> None:
+        super().__init__("Invalid process inputs")
+        self.errors = errors
+
+
+class IdempotencyKeyReusedError(Exception):
+    """The idempotency key was already used for this process with different inputs."""
+
+
 class ProcessService:
     """Reads and manages processes.
 
@@ -112,7 +124,7 @@ class ProcessService:
         # the IntegrityError below.
         process_id = process.id
 
-        existing = await self._get_job_by_key(process_id, idempotency_key)
+        existing = await self._get_job_by_idempotency_key(process_id, idempotency_key)
         if existing is not None:
             return await self._replay(existing, request_hash), False
 
@@ -132,7 +144,7 @@ class ProcessService:
         except IntegrityError:
             # A concurrent request with the same key inserted its job between the lookup above and
             # this insert. The rollback removed our job from the session, return theirs instead.
-            existing = await self._get_job_by_key(process_id, idempotency_key)
+            existing = await self._get_job_by_idempotency_key(process_id, idempotency_key)
             if existing is None:
                 raise  # Some other violation of another constraint
             return await self._replay(existing, request_hash), False
@@ -158,7 +170,9 @@ class ProcessService:
             raise IdempotencyKeyReusedError
         return await self.get_updated_job(job)
 
-    async def _get_job_by_key(self, process_id: int, idempotency_key: str) -> Job | None:
+    async def _get_job_by_idempotency_key(
+        self, process_id: int, idempotency_key: str
+    ) -> Job | None:
         async with self.session.begin():
             return await self.session.scalar(
                 select(Job)
@@ -254,18 +268,6 @@ class ProcessService:
             for job, dag_run in zip(jobs, dag_runs, strict=True):
                 if dag_run is not None:
                     _apply_dag_run(job, dag_run)
-
-
-class InvalidInputsError(Exception):
-    """The user inputs don't match the JSON schema of the process."""
-
-    def __init__(self, errors: list[dict[str, Any]]) -> None:
-        super().__init__("Invalid process inputs")
-        self.errors = errors
-
-
-class IdempotencyKeyReusedError(Exception):
-    """The idempotency key was already used for this process with different inputs."""
 
 
 # FastAPI dependency injection function and definitions

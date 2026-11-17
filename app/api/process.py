@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.exceptions import RequestValidationError
 
 from app.core.authorization import (
@@ -16,7 +16,7 @@ from app.core.process_service import (
 )
 from app.schemas.errors import ErrorResponse
 from app.schemas.process import (
-    IDEMPOTENCY_KEY_MAX_LENGTH,
+    IdempotencyKey,
     Job,
     JobResponse,
     ListJobsParams,
@@ -89,17 +89,7 @@ async def execute_process(  # noqa: PLR0913, PLR0917
     service: ProcessServiceDep,
     authorization: AuthorizationDep,
     response: Response,
-    idempotency_key: Annotated[
-        str,
-        Header(
-            min_length=1,
-            max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
-            description=(
-                "Unique key per job, e.g. a UUID. Retrying a request with the same key returns "
-                "the job of the first request instead of starting a new one."
-            ),
-        ),
-    ],
+    idempotency_key: IdempotencyKey,
 ) -> JobResponse:
     """Start a process by sgid.
 

@@ -22,6 +22,8 @@ from app.models.base import Base
 
 SGID_MAX_LENGTH = 128
 
+IDEMPOTENCY_KEY_MAX_LENGTH = 128
+
 
 class Process(Base):
     """A process that users can run, backed by an Airflow DAG.
@@ -168,7 +170,7 @@ class Job(Base):
     dag_run_id: Mapped[str] = mapped_column(String(250), unique=True)
     # Key sent by the client in the Idempotency-Key header. Repeated requests with the same key for
     # the same process return the existing job instead of starting a new one.
-    idempotency_key: Mapped[str] = mapped_column(String(128))
+    idempotency_key: Mapped[str] = mapped_column(String(IDEMPOTENCY_KEY_MAX_LENGTH))
     # SHA-256 of the inputs, to reject reuse of a key with a different request body
     request_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(128))
