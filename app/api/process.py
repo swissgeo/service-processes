@@ -103,9 +103,9 @@ async def list_jobs(
             Action.GET_PROCESS, [process_resource(p) for p in processes]
         )
     }
-    # list job filtered by processes user us allowed to access and status
+    allowed_process_ids = [p.id for p in processes if p.sgid in allowed_processes]
     jobs, total = await service.list_jobs(
-        [p.id for p in processes if p.sgid in allowed_processes],
+        allowed_process_ids,
         params.status,
         params.limit,
         params.offset,

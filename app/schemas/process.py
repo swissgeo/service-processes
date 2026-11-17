@@ -6,16 +6,14 @@ from pydantic_core import PydanticCustomError
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from app.models import process as models
+from app.models.process import SGID_MAX_LENGTH
 from app.schemas.pagination import PaginatedResponse, PaginationParams
-
-SGID_MAX_LENGTH = 128
 
 # SGIDs are arbitrary strings (not necessarily UUIDs), limited to the length of the DB columns.
 SgidStr = Annotated[str, Field(min_length=1, max_length=SGID_MAX_LENGTH)]
 
-# Max 30 datasets in query as this is the limit of a batch request to AWS Verified permissions.
-MAX_DATASETS = 30
-MAX_PROCESSES = 30
+# To limit the size of SQL IN-filters and the number of authorization calls
+MAX_FILTER_VALUES = 30
 
 
 def _split_comma_separated(value: Any) -> Any:
@@ -31,9 +29,9 @@ class ListProcessesParams(PaginationParams):
     datasets: Annotated[
         list[SgidStr],
         Field(
-            description=f"Comma separated IDs of the datasets (1 to {MAX_DATASETS})",
+            description=f"Comma separated IDs of the datasets (1 to {MAX_FILTER_VALUES})",
             min_length=1,
-            max_length=MAX_DATASETS,
+            max_length=MAX_FILTER_VALUES,
         ),
         BeforeValidator(_split_comma_separated),
     ]
@@ -81,18 +79,18 @@ class ListJobsParams(PaginationParams):
     processes: Annotated[
         list[SgidStr] | None,
         Field(
-            description=f"Comma separated IDs of the processes (1 to {MAX_PROCESSES})",
+            description=f"Comma separated IDs of the processes (1 to {MAX_FILTER_VALUES})",
             min_length=1,
-            max_length=MAX_PROCESSES,
+            max_length=MAX_FILTER_VALUES,
         ),
         BeforeValidator(_split_comma_separated),
     ] = None
     datasets: Annotated[
         list[SgidStr] | None,
         Field(
-            description=f"Comma separated IDs of the datasets (1 to {MAX_DATASETS})",
+            description=f"Comma separated IDs of the datasets (1 to {MAX_FILTER_VALUES})",
             min_length=1,
-            max_length=MAX_DATASETS,
+            max_length=MAX_FILTER_VALUES,
         ),
         BeforeValidator(_split_comma_separated),
     ] = None

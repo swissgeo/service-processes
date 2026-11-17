@@ -17,9 +17,9 @@ from app.core.authorization import (
     process_resource,
 )
 from app.core.process_service import InvalidInputsError, ProcessService, get_process_service
-from app.models.process import Job, JobStatus, Process
+from app.models.process import SGID_MAX_LENGTH, Job, JobStatus, Process
 from app.schemas.pagination import DEFAULT_LIMIT, MAX_LIMIT
-from app.schemas.process import MAX_DATASETS, MAX_PROCESSES, SGID_MAX_LENGTH
+from app.schemas.process import MAX_FILTER_VALUES
 
 TOKEN = "header.payload.signature"  # noqa: S105
 AUTH_HEADERS = {"X-Auth-Request-Access-Token": TOKEN}
@@ -169,7 +169,7 @@ def test_list_processes_multiple_datasets(
         "",
         "?datasets=",
         "?datasets=,",
-        "?datasets=" + ",".join([str(DATASET)] * (MAX_DATASETS + 1)),
+        "?datasets=" + ",".join([str(DATASET)] * (MAX_FILTER_VALUES + 1)),
         "?datasets=" + "a" * (SGID_MAX_LENGTH + 1),
         f"?datasets={DATASET}," + "a" * (SGID_MAX_LENGTH + 1),
     ],
@@ -604,8 +604,8 @@ def test_list_jobs_status_and_pagination(client: TestClient, job_service: AsyncM
         "?status=running",
         "?processes=",
         "?datasets=,",
-        "?processes=" + ",".join(["p"] * (MAX_PROCESSES + 1)),
-        "?datasets=" + ",".join(["d"] * (MAX_DATASETS + 1)),
+        "?processes=" + ",".join(["p"] * (MAX_FILTER_VALUES + 1)),
+        "?datasets=" + ",".join(["d"] * (MAX_FILTER_VALUES + 1)),
         "?processes=" + "a" * (SGID_MAX_LENGTH + 1),
         f"?processes={PROCESS.sgid}&status=unknown",
         f"?processes={PROCESS.sgid}&status=",

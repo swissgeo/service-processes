@@ -14,15 +14,13 @@ from fastapi import Depends
 
 from app.core.airflow import AirflowClient, AirflowDagRunResponse, AirflowDep, AirflowError
 from app.core.database import DatabaseSessionDep
-from app.models.process import Job, JobStatus, Process
+from app.models.process import ACTIVE_STATUSES, Job, JobStatus, Process
 
 logger = logging.getLogger(__name__)
 
-# Statuses of jobs whose dag run can still change in Airflow. Not included: SUBMITTING and
-# FAILED_SUBMIT (the dag run doesn't (yet) exist), SUCCESS and FAILED (the dag run finished).
-ACTIVE_STATUSES = (JobStatus.QUEUED, JobStatus.RUNNING)
-
-# Maximum number of concurrent requests to Airflow when refreshing jobs
+# Maximum number of concurrent requests to Airflow when refreshing jobs.
+# This is just a guess as to what might be reasonable. It limits the calls per request, but not
+# globally. Concurrent requests can together send more requests to airflow.
 MAX_CONCURRENT_AIRFLOW_REQUESTS = 10
 
 
@@ -77,13 +75,15 @@ class ProcessService:
         self, process_sgids: Sequence[str] | None, dataset_sgids: Sequence[str] | None
     ) -> Sequence[Process]:
         """Return the processes matching all given filters (a None filter is ignored)."""
-        statement = select(Process).order_by(Process.id)
+        conditions = []
         if process_sgids is not None:
-            statement = statement.where(Process.sgid.in_(process_sgids))
+            conditions.append(Process.sgid.in_(process_sgids))
         if dataset_sgids is not None:
-            statement = statement.where(Process.dataset_sgid.in_(dataset_sgids))
+            conditions.append(Process.dataset_sgid.in_(dataset_sgids))
         async with self.session.begin():
-            return (await self.session.scalars(statement)).all()
+            return (
+                await self.session.scalars(select(Process).where(*conditions).order_by(Process.id))
+            ).all()
 
     async def execute_process(self, process: Process, inputs: dict[str, Any]) -> Job:
         """Start a process and return the job tracking it.
