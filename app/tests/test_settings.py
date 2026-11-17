@@ -94,12 +94,12 @@ def test_env_overrides_simple_values(monkeypatch: pytest.MonkeyPatch):
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("", ""),
-        ("/", ""),
-        ("specs", "/specs"),
-        ("/specs", "/specs"),
-        ("/specs/", "/specs"),
-        ("/api/specs/", "/api/specs"),
+        pytest.param("", "", id="empty"),
+        pytest.param("/", "", id="root"),
+        pytest.param("specs", "/specs", id="no leading slash"),
+        pytest.param("/specs", "/specs", id="normalized"),
+        pytest.param("/specs/", "/specs", id="trailing slash"),
+        pytest.param("/api/specs/", "/api/specs", id="nested with trailing slash"),
     ],
 )
 def test_doc_prefix_path_is_normalized(monkeypatch: pytest.MonkeyPatch, value: str, expected: str):

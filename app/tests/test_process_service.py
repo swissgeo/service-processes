@@ -155,12 +155,17 @@ class TestListProcesses:
     @pytest.mark.parametrize(
         ("process_sgids", "dataset_sgids", "expected_where"),
         [
-            (["prc_1"], None, "WHERE process.sgid IN ('prc_1') ORDER BY"),
-            (None, ["ds_1"], "WHERE process.dataset_sgid IN ('ds_1') ORDER BY"),
-            (
+            pytest.param(
+                ["prc_1"], None, "WHERE process.sgid IN ('prc_1') ORDER BY", id="processes"
+            ),
+            pytest.param(
+                None, ["ds_1"], "WHERE process.dataset_sgid IN ('ds_1') ORDER BY", id="datasets"
+            ),
+            pytest.param(
                 ["prc_1"],
                 ["ds_1"],
                 "WHERE process.sgid IN ('prc_1') AND process.dataset_sgid IN ('ds_1') ORDER BY",
+                id="processes and datasets",
             ),
         ],
     )
@@ -352,9 +357,24 @@ class TestExecuteProcess:
     @pytest.mark.parametrize(
         ("path", "error", "match"),
         [
-            ("options.crs", ValueError, "options.crs is already set by internal_config"),
-            ("options", ValueError, "options is already set by internal_config"),
-            ("output_format.x", TypeError, "output_format is not an object"),
+            pytest.param(
+                "options.crs",
+                ValueError,
+                "options.crs is already set by internal_config",
+                id="overwrite leaf",
+            ),
+            pytest.param(
+                "options",
+                ValueError,
+                "options is already set by internal_config",
+                id="overwrite object",
+            ),
+            pytest.param(
+                "output_format.x",
+                TypeError,
+                "output_format is not an object",
+                id="write object into string",
+            ),
         ],
     )
     async def test_execute_process_input_cannot_overwrite_internal_config(
@@ -409,7 +429,12 @@ class TestGetJob:
 
     @pytest.mark.parametrize(
         "status",
-        [JobStatus.SUBMITTING, JobStatus.FAILED_SUBMIT, JobStatus.SUCCESS, JobStatus.FAILED],
+        [
+            pytest.param(JobStatus.SUBMITTING, id="submitting"),
+            pytest.param(JobStatus.FAILED_SUBMIT, id="failed submit"),
+            pytest.param(JobStatus.SUCCESS, id="success"),
+            pytest.param(JobStatus.FAILED, id="failed"),
+        ],
     )
     @pytest.mark.asyncio
     async def test_get_updated_job_skips_airflow(self, status: JobStatus):
@@ -424,7 +449,13 @@ class TestGetJob:
         airflow.get_dag_run.assert_not_awaited()
         session.on_commit.assert_not_called()
 
-    @pytest.mark.parametrize("status", [JobStatus.QUEUED, JobStatus.RUNNING])
+    @pytest.mark.parametrize(
+        "status",
+        [
+            pytest.param(JobStatus.QUEUED, id="queued"),
+            pytest.param(JobStatus.RUNNING, id="running"),
+        ],
+    )
     @pytest.mark.asyncio
     async def test_get_updated_job_updates_status_from_dag_run(self, status: JobStatus):
         session = _session()

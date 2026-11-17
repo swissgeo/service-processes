@@ -116,10 +116,10 @@ class TestListProcesses:
     @pytest.mark.parametrize(
         ("query", "expected_limit", "expected_offset"),
         [
-            ("&limit=20&offset=40", 20, 40),
-            ("&limit=1000", MAX_LIMIT, 0),
-            ("&limit=0&offset=-1", 1, 0),
-            ("&limit=abc&offset=xyz", DEFAULT_LIMIT, 0),
+            pytest.param("&limit=20&offset=40", 20, 40, id="valid"),
+            pytest.param("&limit=1000", MAX_LIMIT, 0, id="limit above max"),
+            pytest.param("&limit=0&offset=-1", 1, 0, id="limit and offset below min"),
+            pytest.param("&limit=abc&offset=xyz", DEFAULT_LIMIT, 0, id="not numeric"),
         ],
     )
     @pytest.mark.usefixtures("authorizer")
@@ -143,9 +143,9 @@ class TestListProcesses:
     @pytest.mark.parametrize(
         "query",
         [
-            "?datasets={a},{b}",
-            "?datasets={a}&datasets={b}",
-            "?datasets= {a} , {b} ,",
+            pytest.param("?datasets={a},{b}", id="comma separated"),
+            pytest.param("?datasets={a}&datasets={b}", id="repeated parameter"),
+            pytest.param("?datasets= {a} , {b} ,", id="whitespace and trailing comma"),
         ],
     )
     @pytest.mark.usefixtures("authorizer")
@@ -163,12 +163,18 @@ class TestListProcesses:
     @pytest.mark.parametrize(
         "query",
         [
-            "",
-            "?datasets=",
-            "?datasets=,",
-            "?datasets=" + ",".join([str(DATASET)] * (MAX_FILTER_VALUES + 1)),
-            "?datasets=" + "a" * (SGID_MAX_LENGTH + 1),
-            f"?datasets={DATASET}," + "a" * (SGID_MAX_LENGTH + 1),
+            pytest.param("", id="missing datasets"),
+            pytest.param("?datasets=", id="empty datasets"),
+            pytest.param("?datasets=,", id="only separator"),
+            pytest.param(
+                "?datasets=" + ",".join([str(DATASET)] * (MAX_FILTER_VALUES + 1)),
+                id="too many datasets",
+            ),
+            pytest.param("?datasets=" + "a" * (SGID_MAX_LENGTH + 1), id="dataset id too long"),
+            pytest.param(
+                f"?datasets={DATASET}," + "a" * (SGID_MAX_LENGTH + 1),
+                id="mix valid and too long dataset id",
+            ),
         ],
     )
     @pytest.mark.usefixtures("authorizer")
@@ -254,7 +260,13 @@ class TestListProcesses:
         }
         process_service.list_processes.assert_not_awaited()
 
-    @pytest.mark.parametrize("headers", [{}, {"X-Auth-Request-Access-Token": ""}])
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            pytest.param({}, id="no header"),
+            pytest.param({"X-Auth-Request-Access-Token": ""}, id="empty token"),
+        ],
+    )
     def test_list_processes_missing_token(
         self, client: TestClient, process_service: AsyncMock, authorizer: AsyncMock, headers: dict
     ):
@@ -307,7 +319,13 @@ class TestGetProcess:
 
         assert response.status_code == 503
 
-    @pytest.mark.parametrize("headers", [{}, {"X-Auth-Request-Access-Token": ""}])
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            pytest.param({}, id="no header"),
+            pytest.param({"X-Auth-Request-Access-Token": ""}, id="empty token"),
+        ],
+    )
     def test_get_process_missing_token(
         self, client: TestClient, process_service: AsyncMock, authorizer: AsyncMock, headers: dict
     ):
@@ -553,9 +571,9 @@ class TestListJobsAPI:
     @pytest.mark.parametrize(
         ("query", "expected_processes", "expected_datasets"),
         [
-            ("?processes=a,b", ["a", "b"], None),
-            ("?datasets=d1&datasets=d2", None, ["d1", "d2"]),
-            ("?processes=a&datasets=d1", ["a"], ["d1"]),
+            pytest.param("?processes=a,b", ["a", "b"], None, id="processes"),
+            pytest.param("?datasets=d1&datasets=d2", None, ["d1", "d2"], id="datasets"),
+            pytest.param("?processes=a&datasets=d1", ["a"], ["d1"], id="processes and datasets"),
         ],
     )
     @pytest.mark.usefixtures("authorizer")
@@ -589,15 +607,19 @@ class TestListJobsAPI:
     @pytest.mark.parametrize(
         "query",
         [
-            "",
-            "?status=running",
-            "?processes=",
-            "?datasets=,",
-            "?processes=" + ",".join(["p"] * (MAX_FILTER_VALUES + 1)),
-            "?datasets=" + ",".join(["d"] * (MAX_FILTER_VALUES + 1)),
-            "?processes=" + "a" * (SGID_MAX_LENGTH + 1),
-            f"?processes={PROCESS.sgid}&status=unknown",
-            f"?processes={PROCESS.sgid}&status=",
+            pytest.param("", id="missing scope"),
+            pytest.param("?status=running", id="status without scope"),
+            pytest.param("?processes=", id="empty processes"),
+            pytest.param("?datasets=,", id="only separator datasets"),
+            pytest.param(
+                "?processes=" + ",".join(["p"] * (MAX_FILTER_VALUES + 1)), id="too many processes"
+            ),
+            pytest.param(
+                "?datasets=" + ",".join(["d"] * (MAX_FILTER_VALUES + 1)), id="too many datasets"
+            ),
+            pytest.param("?processes=" + "a" * (SGID_MAX_LENGTH + 1), id="process id too long"),
+            pytest.param(f"?processes={PROCESS.sgid}&status=unknown", id="unknown status"),
+            pytest.param(f"?processes={PROCESS.sgid}&status=", id="empty status"),
         ],
     )
     @pytest.mark.usefixtures("authorizer")
