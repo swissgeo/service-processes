@@ -17,7 +17,7 @@ from app.core.authorization import initialize_authorizer
 from app.core.database import check_database_connection, close_database, initialize_database
 from app.core.exceptions import register_exception_handlers
 from app.openapi import get_published_doc_path, setup_openapi
-from app.otel import initialize_instrumentation, shutdown_otel
+from app.otel import initialize_instrumentation, instrument_database_engine, shutdown_otel
 from app.settings import get_settings
 from app.version import __version__
 
@@ -37,6 +37,7 @@ def get_logging_cfg(config_file: Path) -> dict:  # pragma: no cover
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     await initialize_database(app, settings)
+    instrument_database_engine(app.state.database_engine)
     initialize_authorizer(app, settings)
     initialize_airflow_client(app, settings)
 

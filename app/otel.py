@@ -5,7 +5,10 @@ from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import (
     BatchLogRecordProcessor,
@@ -17,6 +20,7 @@ from opentelemetry.sdk.metrics.export import (
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fastapi import FastAPI
 
@@ -162,6 +166,30 @@ def initialize_instrumentation(app: FastAPI) -> None:
     # Setup tracing instrumentation
     if settings.otel_enable_fastapi:
         FastAPIInstrumentor.instrument_app(app)
+    if settings.otel_enable_boto:
+        BotocoreInstrumentor().instrument()
+    if settings.otel_enable_httpx:
+        # This instruments airflow api calls as they use httpx.AsyncClient
+        HTTPXClientInstrumentor().instrument()
+
+
+def instrument_database_engine(engine: AsyncEngine) -> None:
+    # This is separate from initialize_instrumentation as it requires the database engine to already
+    # exist.
+    settings = get_settings()
+    if settings.otel_sdk_disabled or not settings.otel_enable_sqlalchemy:
+        return
+
+    # Using opentelemetry-instrumentation-sqlalchemy over opentelemetry-instrumentation-asyncpg
+    # as it also provides connection pool metrics.
+    # - enable_commenter would add the trace context as an SQL comment to each query.
+    # - skip_dep_check: instrumentation 0.66b2 declares sqlalchemy < 2.1 but works with 2.1.
+    # TODO: remove skip_dep_check once upstream supports sqlalchemy 2.1.
+    # It is implemented but not yet released:
+    # https://github.com/open-telemetry/opentelemetry-python-contrib/pull/5120
+    SQLAlchemyInstrumentor().instrument(
+        engine=engine.sync_engine, enable_commenter=False, skip_dep_check=True
+    )
 
 
 def shutdown_otel() -> None:
