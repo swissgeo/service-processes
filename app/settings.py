@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     otel_sdk_disabled: bool = False
     # Instrumentation
     otel_enable_fastapi: bool = True
+    otel_enable_boto: bool = True
+    otel_enable_sqlalchemy: bool = True
+    otel_enable_httpx: bool = True
     # OTLP exporter
     otel_enable_otlp_exporter: bool = True
     otel_exporter_otlp_endpoint: str = "http://localhost:4317"
