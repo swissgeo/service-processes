@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.exceptions import RequestValidationError
 
 from app.core.authorization import (
@@ -9,8 +9,14 @@ from app.core.authorization import (
     dataset_resource,
     process_resource,
 )
-from app.core.process_service import InvalidInputsError, ProcessServiceDep
+from app.core.process_service import (
+    IdempotencyKeyReusedError,
+    InvalidInputsError,
+    ProcessServiceDep,
+)
+from app.schemas.errors import ErrorResponse
 from app.schemas.process import (
+    IdempotencyKey,
     Job,
     JobResponse,
     ListJobsParams,
@@ -64,24 +70,49 @@ async def get_process(
     return ProcessResponse.from_model(process)
 
 
-@router.post("/processes/{sgid}/execution", summary="Start a process")
-async def execute_process(
+@router.post(
+    "/processes/{sgid}/execution",
+    summary="Start a process",
+    status_code=201,
+    responses={
+        200: {"model": JobResponse, "description": "Job already started with this Idempotency-Key"},
+        409: {
+            "model": ErrorResponse,
+            "description": "Idempotency-Key already used with a different request body",
+        },
+    },
+)
+# All arguments are injected by FastAPI, splitting them up would not make it simpler
+async def execute_process(  # noqa: PLR0913, PLR0917
     sgid: SgidStr,
     body: ProcessInput,
     service: ProcessServiceDep,
     authorization: AuthorizationDep,
+    response: Response,
+    idempotency_key: IdempotencyKey,
 ) -> JobResponse:
-    """Start a process by sgid"""
+    """Start a process by sgid.
+
+    Returns 201 with the new job, or 200 with the existing job if a job was already started with
+    the same Idempotency-Key for this process.
+    """
     process = await service.get_process(sgid)
     if process is None:
         raise HTTPException(status_code=404, detail="Process not found")
     await authorization.require(Action.EXECUTE_PROCESS, process_resource(process))
 
     try:
-        job = await service.execute_process(process, body.inputs)
+        job, created = await service.execute_process(process, body.inputs, idempotency_key)
     except InvalidInputsError as error:
         # Same response (400) as for other invalid request payloads
         raise RequestValidationError(error.errors) from None
+    except IdempotencyKeyReusedError:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency-Key was already used with a different request body",
+        ) from None
+    if not created:
+        response.status_code = 200
     return JobResponse.from_model(job)
 
 

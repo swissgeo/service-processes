@@ -22,6 +22,8 @@ from app.models.base import Base
 
 SGID_MAX_LENGTH = 128
 
+IDEMPOTENCY_KEY_MAX_LENGTH = 128
+
 
 class Process(Base):
     """A process that users can run, backed by an Airflow DAG.
@@ -126,8 +128,8 @@ class Job(Base):
     """
 
     __tablename__ = "job"
-    # Jobs are listed per process, newest first (see ProcessService.list_jobs)
     __table_args__ = (
+        # Jobs are listed per process, newest first (see ProcessService.list_jobs)
         Index("ix_job_process_id_created_at", "process_id", desc("created_at"), desc("id")),
         # We expect many jobs but not many active jobs compared to finished ones. When listing
         # jobs we refresh all the active ones. This index should improve selecting them.
@@ -138,6 +140,8 @@ class Job(Base):
                 f"status IN ({', '.join(f"'{status}'" for status in ACTIVE_STATUSES)})"
             ),
         ),
+        # Idempotency keys are scoped to the process (see ProcessService.execute_process)
+        UniqueConstraint("process_id", "idempotency_key"),
     )
     # When you access a database-generated field like sgid or timestamps that is not yet loaded in
     # the Python object, SQLAlchemy fires an extra hidden query to fetch its value ("lazy load").
@@ -164,6 +168,11 @@ class Job(Base):
 
     # Chosen by us when triggering the DAG run, so a job can always be matched to its run
     dag_run_id: Mapped[str] = mapped_column(String(250), unique=True)
+    # Key sent by the client in the Idempotency-Key header. Repeated requests with the same key for
+    # the same process return the existing job instead of starting a new one.
+    idempotency_key: Mapped[str] = mapped_column(String(IDEMPOTENCY_KEY_MAX_LENGTH))
+    # SHA-256 of the inputs, to reject reuse of a key with a different request body
+    request_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(128))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

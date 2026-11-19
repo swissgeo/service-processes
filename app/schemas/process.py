@@ -3,14 +3,27 @@ from typing import Annotated, Any, Self
 
 from pydantic_core import PydanticCustomError
 
+from fastapi import Header
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from app.models import process as models
-from app.models.process import SGID_MAX_LENGTH
+from app.models.process import IDEMPOTENCY_KEY_MAX_LENGTH, SGID_MAX_LENGTH
 from app.schemas.pagination import PaginatedResponse, PaginationParams
 
 # SGIDs are arbitrary strings (not necessarily UUIDs), limited to the length of the DB columns.
 SgidStr = Annotated[str, Field(min_length=1, max_length=SGID_MAX_LENGTH)]
+
+IdempotencyKey = Annotated[
+    str,
+    Header(
+        min_length=1,
+        max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
+        description=(
+            "Unique key per job, e.g. a UUID. Retrying a request with the same key returns "
+            "the job of the first request instead of starting a new one."
+        ),
+    ),
+]
 
 # To limit the size of SQL IN-filters and the number of authorization calls
 MAX_FILTER_VALUES = 30

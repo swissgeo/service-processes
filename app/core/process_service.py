@@ -1,5 +1,7 @@
 import asyncio
 import copy
+import hashlib
+import json
 import logging
 import uuid
 from collections.abc import Sequence
@@ -7,6 +9,7 @@ from typing import Annotated, Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -22,6 +25,18 @@ logger = logging.getLogger(__name__)
 # This is just a guess as to what might be reasonable. It limits the calls per request, but not
 # globally. Concurrent requests can together send more requests to airflow.
 MAX_CONCURRENT_AIRFLOW_REQUESTS = 10
+
+
+class InvalidInputsError(Exception):
+    """The user inputs don't match the JSON schema of the process."""
+
+    def __init__(self, errors: list[dict[str, Any]]) -> None:
+        super().__init__("Invalid process inputs")
+        self.errors = errors
+
+
+class IdempotencyKeyReusedError(Exception):
+    """The idempotency key was already used for this process with different inputs."""
 
 
 class ProcessService:
@@ -85,27 +100,54 @@ class ProcessService:
                 await self.session.scalars(select(Process).where(*conditions).order_by(Process.id))
             ).all()
 
-    async def execute_process(self, process: Process, inputs: dict[str, Any]) -> Job:
-        """Start a process and return the job tracking it.
+    async def execute_process(
+        self, process: Process, inputs: dict[str, Any], idempotency_key: str
+    ) -> tuple[Job, bool]:
+        """Start a process and return the job tracking it, and whether the job was created.
 
         The user inputs are validated against the process schema, mapped and merged into the
         internal config and passed as conf to a new run of the process DAG in Airflow.
 
+        The idempotency key makes retries safe: if a job with the same key already exists for
+        this process, it is returned (created=False) with its status refreshed from Airflow, and
+        no new run is triggered, whatever the state of the job.
+
         Raises InvalidInputsError if the inputs don't match the schema of the process.
+        Raises IdempotencyKeyReusedError if the key was already used with different inputs.
         """
         errors = _validate_inputs(process.input_schema, inputs)
         if errors:
             raise InvalidInputsError(errors)
-        conf = _build_dag_conf(process.internal_config, process.parameter_mapping, inputs)
+        request_hash = _hash_inputs(inputs)
+        # Read before the insert: if it fails, the rollback expires all objects of the session and
+        # the async session cannot lazy load the attribute again. This is an issue in handling
+        # the IntegrityError below.
+        process_id = process.id
 
+        existing = await self._get_job_by_idempotency_key(process_id, idempotency_key)
+        if existing is not None:
+            return await self._replay(existing, request_hash), False
+
+        # Only built for new jobs, so that a later change of the process config can't break replays
+        conf = _build_dag_conf(process.internal_config, process.parameter_mapping, inputs)
         job = Job(
-            process_id=process.id,
+            process_id=process_id,
             process=process,  # set, so that the response can include the process sgid
             dag_run_id=str(uuid.uuid7()),
             status=JobStatus.SUBMITTING,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
         )
-        async with self.session.begin():
-            self.session.add(job)  # eager_defaults: sgid etc. are fetched on insert
+        try:
+            async with self.session.begin():
+                self.session.add(job)  # eager_defaults: sgid etc. are fetched on insert
+        except IntegrityError:
+            # A concurrent request with the same key inserted its job between the lookup above and
+            # this insert. The rollback removed our job from the session, return theirs instead.
+            existing = await self._get_job_by_idempotency_key(process_id, idempotency_key)
+            if existing is None:
+                raise  # Some other violation of another constraint
+            return await self._replay(existing, request_hash), False
 
         try:
             await self.airflow.trigger_dag_run(process.dag_id, job.dag_run_id, conf)
@@ -116,7 +158,27 @@ class ProcessService:
 
         async with self.session.begin():
             job.status = JobStatus.QUEUED
-        return job
+        return job, True
+
+    async def _replay(self, job: Job, request_hash: str) -> Job:
+        """Return the existing job of a repeated request, refreshed from Airflow like
+        GET /jobs/{sgid}, if the request has the same inputs.
+
+        Raises IdempotencyKeyReusedError if the inputs differ.
+        """
+        if job.request_hash != request_hash:
+            raise IdempotencyKeyReusedError
+        return await self.get_updated_job(job)
+
+    async def _get_job_by_idempotency_key(
+        self, process_id: int, idempotency_key: str
+    ) -> Job | None:
+        async with self.session.begin():
+            return await self.session.scalar(
+                select(Job)
+                .options(joinedload(Job.process))  # the response includes the process sgid
+                .where(Job.process_id == process_id, Job.idempotency_key == idempotency_key)
+            )
 
     async def get_job(self, sgid: str) -> Job | None:
         """Return the job with the given sgid, or None if it doesn't exist."""
@@ -208,14 +270,6 @@ class ProcessService:
                     _apply_dag_run(job, dag_run)
 
 
-class InvalidInputsError(Exception):
-    """The user inputs don't match the JSON schema of the process."""
-
-    def __init__(self, errors: list[dict[str, Any]]) -> None:
-        super().__init__("Invalid process inputs")
-        self.errors = errors
-
-
 # FastAPI dependency injection function and definitions
 def get_process_service(session: DatabaseSessionDep, airflow: AirflowDep) -> ProcessService:
     return ProcessService(session, airflow)
@@ -278,3 +332,10 @@ def _set_path(target: dict[str, Any], keys: list[str], value: Any) -> None:
         # This prevents user input from overwriting anything in internal_config.
         raise ValueError(f"{'.'.join(keys)} is already set by internal_config")
     target[last] = value
+
+
+def _hash_inputs(inputs: dict[str, Any]) -> str:
+    """SHA-256 of the inputs, independent of the order of the keys."""
+    return hashlib.sha256(
+        json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
